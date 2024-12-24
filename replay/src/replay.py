@@ -1,5 +1,5 @@
 import time, argparse, json, threading
-import numpy as np
+import numpy as np, pandas as pd
 import math
 from serial_emulator import SerialEmulator
 from decoded_messages import DecodedMessage
@@ -15,6 +15,10 @@ STANDARD_OBJECT_LENGTH = 4.24  # [m]
 STANDARD_OBJECT_WIDTH = 1.81  # [m]
 
 UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT = False, False, False, False
+
+METERS_PER_DEGREE_LATITUDE = 111320
+SPEED_THRESHOLD = 15  # [m/s]
+AGE_THRESHOLD = 20  # [ms]
 
 def compare_floats(a, b):
     return math.isclose(a, b, rel_tol=1e-8)
@@ -71,6 +75,100 @@ def print_test_rate_stats(average_update_time, average_update_time_filtered):
     print("UBX-ESF-INS present:", UBX_ESF_INS_PRESENT)
     print("UBX-ESF-RAW present:", UBX_ESF_RAW_PRESENT)
 
+def csv_function(filename, csv_filename, csv_interpolation, start_time, end_time, agent_id=1, agent_type="car"):
+    decoder = DecodedMessage()
+    f = open(filename, "r")
+    data = json.load(f)
+    f.close()
+
+    df = pd.DataFrame(columns=["agent_id", "agent_type", "timeStamp_posix", "latitude_deg", "longitude_deg", "speed_ms", "heading_deg", "accel_ms2"])
+
+    if start_time:
+        data = filter_by_start_time(data, start_time)
+
+    last_update_pos = None
+    i = 0
+    lat = None
+    lon = None
+    heading = None
+    speed = None
+    last_speed = None
+    last_speed_time = None
+    acc = None
+    last_heading = None
+
+    for d in data:
+        last_time = d["timestamp"]
+        message_type = d["type"]
+        if message_type == "Unknown":
+            continue
+        content = d["data"]
+        tmp_lat, tmp_lon, tmp_heading, tmp_speed = None, None, None, None
+        if message_type == "UBX":
+            content = bytes.fromhex(content)
+        tmp_lat, tmp_lon, tmp_heading, tmp_speed = decoder.extract_data(content, message_type)
+        if tmp_lat:
+            lat = tmp_lat
+        if tmp_lon:
+            lon = tmp_lon
+        if tmp_heading:
+            heading = tmp_heading
+        if tmp_speed:
+            speed = tmp_speed
+            acc = (speed - last_speed) / ((d["timestamp"] - last_speed_time) / 1e6) if last_speed else 0
+            last_speed = speed
+            last_speed_time = d["timestamp"]
+
+        if not lat and not lon and not heading and not speed:
+            continue
+
+        if csv_interpolation and speed and last_update_pos:
+            if speed > SPEED_THRESHOLD and (d["timestamp"] - last_update_pos) / 1e3 > AGE_THRESHOLD:
+                pos_age = d["timestamp"] - last_update_pos
+                pos_age /= 1e3
+                interp_points = np.floor(pos_age / AGE_THRESHOLD)
+                heading_diff = heading - last_heading if last_heading else 0
+                for j in range(0, int(interp_points)):
+                    t = last_update_pos + (j+1) * (AGE_THRESHOLD * 1e3)
+                    delta_t = (t - last_update_pos) / 1e6
+                    new_heading = last_heading + j * (heading_diff / interp_points)
+                    delta_x = speed * delta_t * math.sin(new_heading)
+                    delta_y = speed * delta_t * math.cos(new_heading)
+                    new_lat = lat + (delta_y / METERS_PER_DEGREE_LATITUDE)
+                    new_lon = lon + (delta_x / (METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(lat))))
+                    interp_lat = new_lat
+                    if not tmp_lat:
+                        lat = interp_lat 
+                    interp_lon = new_lon
+                    if not tmp_lon:
+                        lon = interp_lon
+                    interp_heading = new_heading
+                    if not tmp_heading:
+                        heading = interp_heading
+                    last_heading = new_heading
+                    df.loc[len(df)] = [agent_id, agent_type, t, interp_lat, interp_lon, speed, interp_heading, acc]
+                    last_update_pos = t
+                    i += 1
+
+        last_speed = speed if speed else last_speed
+        last_heading = heading if heading else last_heading
+        if tmp_lat and tmp_lon:
+            last_update_pos = d["timestamp"]
+        if (lat and lon and heading and speed):
+            df.loc[len(df)] = [agent_id, agent_type, d["timestamp"], lat, lon, speed, heading, acc]
+            i += 1
+
+        if end_time and time.time() * 1e6 - start_time > end_time:
+            break
+
+    try:
+        print("Saving data to file", csv_filename)
+        df.to_csv(csv_filename, index=False)
+        print("Data saved successfully")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
 def test_rate_function(filename, start_time, end_time):
     """
     Test rate function that calculates the update rate of the GNSS messages.
@@ -116,23 +214,16 @@ def test_rate_function(filename, start_time, end_time):
         if message_type == "Unknown":
             continue
         content = d["data"]
+        tmp_lat, tmp_lon, tmp_heading, tmp_speed = None, None, None, None
         if message_type == "UBX":
             content = bytes.fromhex(content)
-        else:
-            # For the NMEA messages we need to encode the content for the serial emulator and decode it for the GUI (to obtain a string)
-            content = content.encode()
+            ubx_type = decoder.get_ubx_message_type(content)
+            set_ubx_flag(ubx_type)
+        tmp_lat, tmp_lon, tmp_heading, tmp_speed = decoder.extract_data(content, message_type)
         test_rate_lat = None
         test_rate_lon = None
         test_rate_heading = None
         test_rate_speed = None
-        tmp_lat, tmp_lon, tmp_heading, tmp_speed = None, None, None, None
-        if message_type == "UBX":
-            # Check the UBX message type
-            ubx_type = decoder.get_ubx_message_type(content)
-            set_ubx_flag(ubx_type)
-            tmp_lat, tmp_lon, tmp_heading, tmp_speed = decoder.extract_data(content, message_type)
-        else:
-            tmp_lat, tmp_lon, tmp_heading, tmp_speed = decoder.extract_data(content.decode(), message_type)
         if tmp_lat:
             test_rate_lat = tmp_lat
         if tmp_lon:
@@ -196,7 +287,7 @@ def test_rate_function(filename, start_time, end_time):
         if message_type == "UBX":
             update_msg_type.append("UBX-NAV-PVT")
         else:
-            update_msg_type.append("NMEA-Gx" + content[3:6].decode())
+            update_msg_type.append("NMEA-Gx" + content[3:6])
 
         if test_rate_lat and test_rate_lon:
             update_msg_lat.append(test_rate_lat)
@@ -451,43 +542,49 @@ def main():
     and writes the data to a serial device.
 
     Command-line Arguments:
-    - --enable_serial (bool): Whether to enable the serial emulator. Default is False. Can be activated by writing it.
-    - --serial_filename (str): The file to read data from. Default is "./data/examples/example1.json".
-    - --server_device (str): The device to write data to. Default is "./replay/ttyNewServer".
-    - --client_device (str): The device to read data from. Default is "./replay/ttyNewClient".
+    - --enable-serial (bool): Whether to enable the serial emulator. Default is False. Can be activated by writing it.
+    - --serial-filename (str): The file to read data from. Default is "./data/examples/example1.json".
+    - --server-device (str): The device to write data to. Default is "./replay/ttyNewServer".
+    - --client-device (str): The device to read data from. Default is "./replay/ttyNewClient".
     - --baudrate (int): The baudrate to write. Default is 115200.
-    - --start_time (int): The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.
-    - --end_time (int): The time to stop reading in seconds. If not specified, will write until the end of the file.
-    - --enable_gui (bool): Whether to display the GUI. Default is False. Can be activated by writing it.
-    - --enable_test_rate (int): Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False. Can be activated by writing it.
-    - --httpport (int): The port for the HTTP server. Default is 8080.
-    - --server_ip (str): The IP address of the server. Default is
-    - --server_port (int): The port of the server. Default is 48110.
-    - --enable_CAN (bool): Whether to enable the CAN emulator. Default is False. Can be activated by writing it.
-    - --CAN_db (str): The CAN database file. Default is "./data/can_db/motohawk.dbc".
-    - --CAN_device (str): The CAN device to write to. Default is "vcan0".
-    - --CAN_filename (str): The CAN file to read from. Default is "./data/CANlog.log".
+    - --start-time (int): The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.
+    - --end-time (int): The time to stop reading in seconds. If not specified, will write until the end of the file.
+    - --enable-gui (bool): Whether to display the GUI. Default is False. Can be activated by writing it.
+    - --enable-test-rate (int): Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False. Can be activated by writing it.
+    - --http-port (int): The port for the HTTP server. Default is 8080.
+    - --server-ip (str): The IP address of the server. Default is 127.0.0.1
+    - --server-port (int): The port of the server. Default is 48110.
+    - --enable-CAN (bool): Whether to enable the CAN emulator. Default is False. Can be activated by writing it.
+    - --CAN-db (str): The CAN database file. Default is "./data/can_db/motohawk.dbc".
+    - --CAN-device (str): The CAN device to write to. Default is "vcan0".
+    - --CAN-filename (str): The CAN file to read from. Default is "./data/CANlog.log".
+    - --enable-csv (bool): Save the data to a csv file. Default is False. Can be activated by writing it.
+    - --csv-filename (str): The csv file to save the data to. Default is "./data/examples/example.csv".
+    - --csv-interpolation (bool): Interpolate the data to have a fixed information updating. Default is False. Can be activated by writing it.
 
     Example:
-    python3 ./replay/src/replay.py --enable_serial --serial_filename ./data/gnss_output/example1.json --server_device ./replay/ttyNewServer --client_device ./replay/ttyNewClient --baudrate 115200 --start_time 0 --end_time 10 --enable_gui --enable_test_rate --httpport 8080 --server_ip
+    python3 ./replay/src/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080
     """
     args = argparse.ArgumentParser()
-    args.add_argument("--enable_serial", action="store_true", help="Enable serial emulator")
-    args.add_argument("--serial_filename", type=str, help="The file to read data from", default="./data/gnss_output/example.json")
-    args.add_argument("--server_device", type=str, help="The device to write data to", default="./replay/ttyNewServer")
-    args.add_argument("--client_device", type=str, help="The device to read data from", default="./replay/ttyNewClient")
+    args.add_argument("--enable-serial", action="store_true", help="Enable serial emulator")
+    args.add_argument("--serial-filename", type=str, help="The file to read data from", default="./data/gnss_output/example.json")
+    args.add_argument("--server-device", type=str, help="The device to write data to", default="./replay/ttyNewServer")
+    args.add_argument("--client-device", type=str, help="The device to read data from", default="./replay/ttyNewClient")
     args.add_argument("--baudrate", type=int, help="The baudrate to write", default=115200)
-    args.add_argument("--start_time", type=int, help="The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.", default=None)
-    args.add_argument("--end_time", type=int, help="The time to stop reading in seconds, if not specified, will write until the endo fo the file", default=None)
-    args.add_argument("--enable_gui", action="store_true", help="Whether to display the GUI. Default is False", default=False)
-    args.add_argument("--enable_test_rate", action="store_true", help="Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False", default=False)
-    args.add_argument("--httpport", type=int, help="The port for the HTTP server. Default is 8080", default=8080)
-    args.add_argument("--server_ip", type=str, help="The IP address of the server. Default is 127.0.0.1", default="127.0.0.1")
-    args.add_argument("--server_port", type=int, help="The port of the server. Default is 48110", default=48110)
-    args.add_argument("--enable_CAN", action="store_true", help="Enable CAN emulator", default=False)
-    args.add_argument("--CAN_db", type=str, help="The CAN database file", default="./data/can_db/motohawk.dbc")
-    args.add_argument("--CAN_device", type=str, help="The CAN device to write to", default="vcan0")
-    args.add_argument("--CAN_filename", type=str, help="The CAN file to read from", default="./data/can_output/can_log.json")
+    args.add_argument("--start-time", type=int, help="The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.", default=None)
+    args.add_argument("--end-time", type=int, help="The time to stop reading in seconds, if not specified, will write until the endo fo the file", default=None)
+    args.add_argument("--enable-gui", action="store_true", help="Whether to display the GUI. Default is False", default=False)
+    args.add_argument("--enable-test-rate", action="store_true", help="Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False", default=False)
+    args.add_argument("--http-port", type=int, help="The port for the HTTP server. Default is 8080", default=8080)
+    args.add_argument("--server-ip", type=str, help="The IP address of the server. Default is 127.0.0.1", default="127.0.0.1")
+    args.add_argument("--server-port", type=int, help="The port of the server. Default is 48110", default=48110)
+    args.add_argument("--enable-CAN", action="store_true", help="Enable CAN emulator", default=False)
+    args.add_argument("--CAN-db", type=str, help="The CAN database file", default="./data/can_db/motohawk.dbc")
+    args.add_argument("--CAN-device", type=str, help="The CAN device to write to", default="vcan0")
+    args.add_argument("--CAN-filename", type=str, help="The CAN file to read from", default="./data/can_output/can_log.json")
+    args.add_argument("--enable-csv", action="store_true", help="Save the data to a csv file", default=False)
+    args.add_argument("--csv-filename", type=str, help="The csv file to save the data to", default="./data/gnss_output/example.csv")
+    args.add_argument("--csv-interpolation", action="store_true", help="Interpolate the data to have a fixed information updating", default=False)
 
     args = args.parse_args()
     serial = args.enable_serial
@@ -498,7 +595,7 @@ def main():
     start_time = args.start_time * 1e6 if args.start_time else None
     end_time = args.end_time * 1e6 if args.end_time else None
     gui = args.enable_gui
-    httpport = args.httpport
+    httpport = args.http_port
     server_ip = args.server_ip
     server_port = args.server_port
     test_rate = args.enable_test_rate
@@ -511,14 +608,18 @@ def main():
     CAN_filename = args.CAN_filename
     # CAN_filename = "./data/can_output/CANlog.json" # For testing purposes
 
-    assert serial > 0 or gui > 0 or test_rate > 0 or CAN > 0, "At least one of the serial or GUI or test rate or CAN options must be activated"
+    csv = args.enable_csv
+    csv_filename = args.csv_filename
+    csv_interpolation = args.csv_interpolation
 
-    if test_rate > 0 and (serial > 0 or gui > 0):
-        "Error: test rate mode can be selected only when both --gui and --serial are set to 0"
-        exit(1)
+    assert serial > 0 or gui > 0 or test_rate > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
     visualizer = None
     fifo_path = None
+    can_thread = None
+    test_rate_thread = None
+    csv_thread = None
+
     if gui:
         # Creation of the visualizer object
         visualizer = Visualizer()
@@ -528,20 +629,44 @@ def main():
             os.mkfifo(fifo_path)
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
     
+    if serial:
+        assert os.path.exists(serial_filename), "The file does not exist"
+        serial_function(server_device, client_device, baudrate, serial_filename, start_time, end_time, gui, server_ip, server_port, fifo_path, visualizer)
+    
     if CAN:
+        assert os.path.exists(CAN_filename), "The file does not exist"
+        assert os.path.exists(CAN_db), "The CAN database file does not exist"
         can_thread = threading.Thread(
             target=write_CAN, args=(CAN_device, CAN_filename, CAN_db, start_time, end_time, gui, visualizer, server_ip, server_port)
         )
         can_thread.daemon = True
         can_thread.start()
 
-    if serial:
-        serial_function(server_device, client_device, baudrate, serial_filename, start_time, end_time, gui, server_ip, server_port, fifo_path, visualizer)
-    elif test_rate:
-        test_rate_function(serial_filename, start_time, end_time)
+    if test_rate:
+        assert os.path.exists(serial_filename), "The file does not exist"
+        test_rate_thread = threading.Thread(
+            target=test_rate_function, args=(serial_filename, start_time, end_time)
+        )
+        test_rate_thread.daemon = True
+        test_rate_thread.start()
+    
+    if csv:
+        assert os.path.exists(serial_filename), "The file does not exist"
+        csv_thread = threading.Thread(
+            target=csv_function, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time)
+        )
+        csv_thread.daemon = True
+        csv_thread.start()
 
     if CAN:
         can_thread.join()
+    
+    if test_rate:
+        test_rate_thread.join()
+    
+    if csv:
+        csv_thread.join()
+    
 
 if __name__ == "__main__":
     main()
