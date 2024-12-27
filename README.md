@@ -28,37 +28,41 @@ It consists of two main scripts: `record/src/record.py` and `replay/src/replay.p
         git clone https://github.com/Diegomangasco/GNSS-Parser-Reproducer.git
         cd GNSS-Parser-Reproducer
     ```
-
 2. Install the required Python packages:
+   ```sh
+       pip install -r requirements.txt
+   ```
+
+3. [Optional] Install the required Python packages:
     ```sh
         pip install pyserial
         pip install cantools
         pip install pyproj
     ```
 
-3. Ensure `socat` is installed on your system:
+4. Ensure `socat` is installed on your system:
     ```sh
         sudo apt-get install socat
     ```
 
-4. Ensure `nodejs` is installed on your system:
+5. Ensure `nodejs` is installed on your system:
     ```sh
         sudo apt install nodejs
     ```
 
-5. Install the npm packages:
+6. Install the npm packages:
     ```sh
         cd replay/vehicle_visualizer
         npm install
     ```
 
-6. Prepare the virtual CAN Bus for the emulation:
+7. Prepare the virtual CAN Bus for the emulation:
     ```sh
         sudo ip link add dev vcan0 type vcan
         sudo ip link set up vcan0       
     ```
 
-7. [Optional] Install the can-utils packages (just if you want to test with "canplayer" and "candump"):
+8. [Optional] Install the can-utils packages (just if you want to test with "canplayer" and "candump"):
     ```sh
         sudo apt install can-utils
     ```

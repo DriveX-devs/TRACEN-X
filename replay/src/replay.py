@@ -1,5 +1,6 @@
 import time, argparse, json, threading
-import numpy as np, pandas as pd
+import numpy as np
+import pandas as pd
 import math
 from serial_emulator import SerialEmulator
 from decoded_messages import DecodedMessage
@@ -76,6 +77,9 @@ def print_test_rate_stats(average_update_time, average_update_time_filtered):
     print("UBX-ESF-RAW present:", UBX_ESF_RAW_PRESENT)
 
 def csv_function(filename, csv_filename, csv_interpolation, start_time, end_time, agent_id=1, agent_type="car"):
+    """
+    CSV function to store in a csv file the kinematic of the agent over the capture
+    """
     decoder = DecodedMessage()
     f = open(filename, "r")
     data = json.load(f)
@@ -154,7 +158,7 @@ def csv_function(filename, csv_filename, csv_interpolation, start_time, end_time
         last_heading = heading if heading else last_heading
         if tmp_lat and tmp_lon:
             last_update_pos = d["timestamp"]
-        if (lat and lon and heading and speed):
+        if lat and lon and heading and speed:
             df.loc[len(df)] = [agent_id, agent_type, d["timestamp"], lat, lon, speed, heading, acc]
             i += 1
 
