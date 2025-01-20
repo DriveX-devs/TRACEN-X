@@ -2,7 +2,7 @@ import time, argparse, json, threading
 import numpy as np
 import pandas as pd
 import math
-from serial_emulator import SerialEmulator
+from serial_emulator.src import SerialEmulator
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
 import os
