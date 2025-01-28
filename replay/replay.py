@@ -1,13 +1,20 @@
-import time, argparse, json, threading
+import time
+import argparse
+import json
+import threading
+import sys
 import numpy as np
 import pandas as pd
 import math
-from serial_emulator.src import SerialEmulator
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
 import os
 import cantools, can
 import pyproj
+
+sys.path.insert(1, './serial_emulator')
+                
+from serial_emulator import SerialEmulator
 
 CLUSTER_TSHOLD_MS = 20 # In [ms]
 MAP_OPENED = False

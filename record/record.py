@@ -1,11 +1,18 @@
-import serial, time, json, argparse, os
+import serial
+import time
+import json
+import argparse
+import sys
 import signal
 from collections import deque
 import cantools, can
 import cantools.logreader
 import threading
 import traceback
-from serial_emulator.src import SerialEmulator 
+
+sys.path.insert(1, './serial_emulator')
+                
+from serial_emulator import SerialEmulator
 
 TERMINATOR_FLAG = False
 CAN_WAIT_TIME = 200 # seconds
