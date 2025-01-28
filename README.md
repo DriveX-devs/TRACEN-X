@@ -19,6 +19,8 @@ It consists of two main scripts: `record/src/record.py` and `replay/src/replay.p
 - nodejs (for GUI mode)
 - socat (for serial emulation)
 - cantools (for CAN Bus recording and reproducing)
+- pandas (for writing GNSS data into csv format)
+- numpy (for mathematical computations)
 - [Optional] can-utils (for testing CAN Bus features with "canplayer" and "candump")
 
 ## Installation
@@ -28,41 +30,51 @@ It consists of two main scripts: `record/src/record.py` and `replay/src/replay.p
         git clone https://github.com/Diegomangasco/GNSS-Parser-Reproducer.git
         cd GNSS-Parser-Reproducer
     ```
-2. Install the required Python packages:
+2. Upgrade pip
+    ```sh
+       python3 -m pip install --upgrade pip
+    ```
+3. [Optional] Set environmental variable for embedded systems (e.g. On Board Units) to work correclty with cantools package:
+    ```sh
+        MSGPACK_PUREPYTHON=1 pip3 install --no-cache-dir cantools
+    ```
+4. Install the required Python packages:
    ```sh
        pip install -r requirements.txt
    ```
 
-3. [Optional] Install the required Python packages:
+5. [Optional] Install the required Python packages:
     ```sh
         pip install pyserial
         pip install cantools
         pip install pyproj
+        pip install pandas
+        pip install numpy
     ```
 
-4. Ensure `socat` is installed on your system:
+6. Ensure `socat` is installed on your system:
     ```sh
         sudo apt-get install socat
     ```
 
-5. Ensure `nodejs` is installed on your system:
+7. Ensure `nodejs` is installed on your system:
     ```sh
         sudo apt install nodejs
     ```
 
-6. Install the npm packages:
+8. Install the npm packages:
     ```sh
         cd replay/vehicle_visualizer
         npm install
     ```
 
-7. Prepare the virtual CAN Bus for the emulation:
+9. Prepare the virtual CAN Bus for the emulation:
     ```sh
         sudo ip link add dev vcan0 type vcan
         sudo ip link set up vcan0       
     ```
 
-8. [Optional] Install the can-utils packages (just if you want to test with "canplayer" and "candump"):
+10. [Optional] Install the can-utils packages (just if you want to test with "canplayer" and "candump"):
     ```sh
         sudo apt install can-utils
     ```
