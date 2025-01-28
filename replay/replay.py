@@ -574,7 +574,7 @@ def main():
     - --csv-interpolation (bool): Interpolate the data to have a fixed information updating. Default is False. Can be activated by writing it.
 
     Example:
-    python3 ./replay/src/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080
+    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080
     """
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial emulator")

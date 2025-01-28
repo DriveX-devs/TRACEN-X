@@ -295,7 +295,7 @@ def main():
     - --real-time-serial (bool): Enable real-time serial emulation. Default is False. Can be activated by writing it.
 
     Example:
-    python3 ./record/src/record.py --enable_serial --device=/dev/ttyACM0 --serial_filename=./data/outlog.json --baudrate=115200 --end_time=10 --enable_CAN --CAN_device=vcan0 --CAN_filename=./data/CANlog.json --CAN_db=./data/motohawk.db
+    python3 record/record.py --enable_serial --device=/dev/ttyACM0 --serial_filename=./data/outlog.json --baudrate=115200 --end_time=10 --enable_CAN --CAN_device=vcan0 --CAN_filename=./data/CANlog.json --CAN_db=./data/motohawk.db
     """
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial logging")
