@@ -2,7 +2,7 @@
 
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
-It consists of two main scripts: `record/src/record.py` and `replay/src/replay.py`.
+It consists of two main scripts: `record/record.py` and `replay/replay.py`.
 
 ## Features
 
@@ -78,6 +78,27 @@ It consists of two main scripts: `record/src/record.py` and `replay/src/replay.p
     ```sh
         sudo apt install can-utils
     ```
+
+## Usage
+
+### Record
+
+Example of usage for the record script:
+```sh
+    python3 record/record.py --enable_serial --device=/dev/ttyACM0 --serial_filename=./data/outlog.json --baudrate=115200 --end_time=50 --enable_CAN --CAN_device=vcan0 --CAN_filename=./data/CANlog.json --CAN_db=./data/motohawk.dbc
+```
+
+Follow the instructions inside the script to select the desired options.
+
+### Replay
+
+Example of usage for the replay script:
+```sh
+    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 10 --end-time 50 --enable-gui --http-port 8080
+    
+```
+
+Follow the instructions inside the script to select the desired options.
 
 ## Authors
 - **Diego Gasco** - Politecnico di Torino - diego.gasco@polito.it
