@@ -40,7 +40,7 @@ class Visualizer:
             id = 1
             station_type = 5
         elif CAN_flag:
-            id = station_id
+            id = 2
             station_type = type
         if not heading:
             heading = 361
