@@ -718,6 +718,8 @@ def main():
     csv_thread = None
     gui_thread = None
 
+    agent_type = "car"
+
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
         serial_thread = threading.Thread(
@@ -771,7 +773,7 @@ def main():
     if csv:
         assert os.path.exists(serial_filename), "The file does not exist"
         csv_thread = threading.Thread(
-            target=csv_conversion, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time)
+            target=csv_conversion, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id=1, agent_type=agent_type)
         )
         csv_thread.daemon = True
         csv_thread.start()
