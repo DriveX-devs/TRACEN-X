@@ -48,7 +48,7 @@ def set_ubx_flag(ubx_type):
         if ubx_type == "ESF-RAW":
             UBX_ESF_RAW_PRESENT = True
         
-def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, server_ip, server_port, visualizer):
+def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, server_ip, server_port, visualizer, station_id=1, type=5):
     global MAP_OPENED
     try:
         if not MAP_OPENED:
@@ -65,7 +65,7 @@ def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, ser
         raise e
     try:
         # Send the new object position to the server that will update the map GUI
-        visualizer.send_object_udp_message(GNSS_flag, CAN_flag, latitude, longitude, heading, server_ip, server_port)
+        visualizer.send_object_udp_message(GNSS_flag, CAN_flag, latitude, longitude, heading, server_ip, server_port, station_id, type)
     except Exception as e:
         print(f"Error sending UDP message: {e}")
         raise e
@@ -399,7 +399,7 @@ def CAN_gui(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, 
                     ego_y += yDistance
                     # Reverse transformation: convert projected (x, y) back to geographic coordinates (lat, lon)
                     lon1, lat1 = proj_tmerc(ego_x, ego_y, inverse=True)
-                    manage_map(GNSS_flag=False, CAN_flag=True, fifo_path=fifo_path, latitude=lat1, longitude=lon1, heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer)
+                    manage_map(GNSS_flag=False, CAN_flag=True, fifo_path=fifo_path, latitude=lat1, longitude=lon1, heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer, station_id=arbitration_id, type=5)
                 pass
         start_time_us = start_time if start_time else 0
         # Calculate the delta time in the recording between the current message and the start time
