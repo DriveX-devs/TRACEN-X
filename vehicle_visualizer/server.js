@@ -55,7 +55,7 @@ udpSocket.on('message', (msg, rinfo) => {
     try {
         const msg_fields = msg.toString().split(',');
 
-        console.log(msg.toString());
+        // console.log(msg.toString());
     
         if (msg_fields[0] === "map") {
             if (msg_fields.length !== 3) {
@@ -82,7 +82,7 @@ udpSocket.on('message', (msg, rinfo) => {
             const lat = parseFloat(msg_fields[2]);
             const lon = parseFloat(msg_fields[3]);
             const heading = parseFloat(msg_fields[5]);
-            console.log(`Received data - Lat: ${lat}, Lon: ${lon}, Heading: ${heading}`);
+            // console.log(`Received data - Lat: ${lat}, Lon: ${lon}, Heading: ${heading}`);
             io.sockets.send(msg.toString());
         } else {
             console.error("Error: received a corrupted message.");
