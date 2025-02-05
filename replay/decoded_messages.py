@@ -1,3 +1,5 @@
+from typing import Tuple, Optional
+
 class DecodedMessage:
     NMEA_MESSAGES = {
         "DTM": {
@@ -68,7 +70,8 @@ class DecodedMessage:
     def __init__(self):
         pass
 
-    def extract_data(self, content, message_type, direction=None) -> tuple[float|None, float|None, float|None, float|None]:
+    def extract_data(self, content, message_type, direction=None) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    #def extract_data(self, content, message_type, direction=None) -> tuple[float|None, float|None, float|None, float|None]:
         """
         Extracts the latitude, longitude, and heading.
         """
@@ -148,7 +151,8 @@ class DecodedMessage:
         
         return lat, lon, heading, speed
     
-    def get_ubx_message_type(self, content) -> str|None:
+    def get_ubx_message_type(self, content) -> Optional[str]:
+    # def get_ubx_message_type(self, content) -> str|None:
         """
         Returns the UBX message type.
         """
