@@ -55,6 +55,7 @@ def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, ser
             # Open the map GUI after the nodejs server is ready
             fp = open(fifo_path, 'r')
             info = fp.read()
+            print(info)
             if "ready" not in info:
                 raise Exception("Error opening map GUI")
             visualizer.open_map_gui(latitude, longitude, server_ip, server_port)
@@ -694,7 +695,7 @@ def main():
     httpport = args.http_port
     server_ip = args.server_ip
     server_port = args.server_port
-    test_rate = args.enable_test_rate
+    test_rate_enabled = args.enable_test_rate
 
     CAN = args.enable_CAN
     # CAN = True # For testing purposes
@@ -708,7 +709,7 @@ def main():
     csv_filename = args.csv_filename
     csv_interpolation = args.csv_interpolation
 
-    assert serial > 0 or gui > 0 or test_rate > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
+    assert serial > 0 or gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
     visualizer = None
     fifo_path = None
@@ -762,7 +763,7 @@ def main():
         can_thread.daemon = True
         can_thread.start()
 
-    if test_rate:
+    if test_rate_enabled:
         assert os.path.exists(serial_filename), "The file does not exist"
         test_rate_thread = threading.Thread(
             target=test_rate, args=(serial_filename, start_time, end_time)
@@ -787,7 +788,7 @@ def main():
     if CAN:
         can_thread.join()
     
-    if test_rate:
+    if test_rate_enabled:
         test_rate_thread.join()
     
     if csv:
