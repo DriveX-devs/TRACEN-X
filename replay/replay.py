@@ -28,13 +28,16 @@ METERS_PER_DEGREE_LATITUDE = 111320
 SPEED_THRESHOLD = 15  # [m/s]
 AGE_THRESHOLD = 20  # [ms]
 
+
 def compare_floats(a, b):
     return math.isclose(a, b, rel_tol=1e-8)
+
 
 def filter_by_start_time(data, start_time):
     start_time_micseconds = start_time
     assert start_time_micseconds < data[-1]["timestamp"], "The start time is greater than the last timestamp in the file"
     return list(filter(lambda x: x["timestamp"] >= start_time_micseconds, data))
+
 
 def set_ubx_flag(ubx_type):
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
@@ -47,7 +50,8 @@ def set_ubx_flag(ubx_type):
             UBX_ESF_INS_PRESENT = True
         if ubx_type == "ESF-RAW":
             UBX_ESF_RAW_PRESENT = True
-        
+
+
 def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, server_ip, server_port, visualizer, station_id=1, type=5):
     global MAP_OPENED
     try:
@@ -71,6 +75,7 @@ def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, ser
         print(f"Error sending UDP message: {e}")
         raise e
     
+
 def print_test_rate_stats(average_update_time, average_update_time_filtered):
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
     print("Average update periodicity:", average_update_time, "ms")
@@ -83,6 +88,7 @@ def print_test_rate_stats(average_update_time, average_update_time_filtered):
     print("UBX-NAV-ATT present:", UBX_NAV_ATT_PRESENT)
     print("UBX-ESF-INS present:", UBX_ESF_INS_PRESENT)
     print("UBX-ESF-RAW present:", UBX_ESF_RAW_PRESENT)
+
 
 def csv_conversion(filename, csv_filename, csv_interpolation, start_time, end_time, agent_id=1, agent_type="car"):
     """
@@ -177,6 +183,7 @@ def csv_conversion(filename, csv_filename, csv_interpolation, start_time, end_ti
         print("Saving data to file", csv_filename)
         df.to_csv(csv_filename, index=False)
         print("Data saved successfully")
+
     except Exception as e:
         print(f"Error: {e}")
 
@@ -337,86 +344,95 @@ def test_rate(filename, start_time, end_time):
     except Exception as e:
         print(f"Error: {e}")
 
+
 def CAN_gui(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, fifo_path, visualizer):
     """
     GUI function to display the data on the map.
     """
-    f = open(CAN_filename, "r")
-    data = json.load(f)
-    f.close()
-    # Filter the data by the start time
-    if start_time:
-        data = filter_by_start_time(data, start_time)
-    # Load the CAN database
-    db = cantools.database.load_file(CAN_db)
-    previous_time = 0 if not start_time else start_time
-    variable_delta_us_factor = 0
-    startup_time = time.time() * 1e6
-    for d in data:
-        delta_time = d["timestamp"] - previous_time
-        arbitration_id = d["arbitration_id"]
-        content = d["data"]
-        # Get the message from the CAN database
-        message = db.get_message_by_frame_id(arbitration_id)
-        # TODO - handle other types of messages
-        if message and 'Object' in message.name:
-            angle_left_signal = None
-            angle_right_signal = None
-            distance_signal = None
+    try:
+        f = open(CAN_filename, "r")
+        data = json.load(f)
+        f.close()
+        # Filter the data by the start time
+        if start_time:
+            data = filter_by_start_time(data, start_time)
+        # Load the CAN database
+        db = cantools.database.load_file(CAN_db)
+        previous_time = 0 if not start_time else start_time
+        variable_delta_us_factor = 0
+        startup_time = time.time() * 1e6
+        for d in data:
+            delta_time = d["timestamp"] - previous_time
+            arbitration_id = d["arbitration_id"]
+            content = d["data"]
+            # Get the message from the CAN database
+            message = db.get_message_by_frame_id(arbitration_id)
+            # TODO - handle other types of messages
+            if message and 'Object' in message.name:
+                angle_left_signal = None
+                angle_right_signal = None
+                distance_signal = None
 
-            for signal in message.signals:
-                if 'angle' in signal.comment:
-                    if 'left' in signal.comment:
-                        angle_left_signal = signal
-                    elif 'right' in signal.comment:
-                        angle_right_signal = signal
-                elif 'distance' in signal.comment:
-                    distance_signal = signal
-            if content and visualizer.getEgoPosition() is not None and angle_left_signal and angle_right_signal and distance_signal:
-                if content[distance_signal.name] != 0.0:
-                    ego_lat, ego_lon, ego_heading = visualizer.getEgoPosition()
-                    distance = content[distance_signal.name]
-                    angle_left = content[angle_left_signal.name]
-                    angle_right = content[angle_right_signal.name]
-                    # Calculate the position of the object
-                    dx_v = distance - BUMPER_TO_SENSOR_DISTANCE + STANDARD_OBJECT_LENGTH / 2
-                    dist_left = dx_v / math.cos(angle_left)
-                    dist_right = dx_v / math.cos(angle_right)
-                    dy_left = dist_left * math.sin(angle_left)
-                    dy_right = dist_right * math.sin(angle_right)
-                    width = dy_right - dy_left
-                    dy_v = dy_left + width / 2
-                    # ETSI TS 103 324 V2.1.1 (2023-06) demands xDistance and yDistance to be with East as positive x and North as positive y
-                    ego_heading_cart = math.radians(90-ego_heading)  # The heading from the gps is relative to North --> 90 degrees from East
-                    dy_c = -dy_v  # Left to the sensor is negative in radar frame but positive in cartesian reference
-                    xDistance = dx_v * math.cos(ego_heading_cart) - dy_c * math.sin(ego_heading_cart)
-                    yDistance = dx_v * math.sin(ego_heading_cart) + dy_c * math.cos(ego_heading_cart)
-                    # Calculate the position of the object in the global reference frame
-                    utm_zone = int((ego_lon + 180) // 6) + 1  # Calculate UTM zone based on longitude
-                    proj_tmerc = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84', datum='WGS84')
-                    # Forward transformation: convert geographic coordinates (lat, lon) to projected (x, y)
-                    ego_x, ego_y = proj_tmerc(ego_lon, ego_lat)
-                    ego_x += xDistance
-                    ego_y += yDistance
-                    # Reverse transformation: convert projected (x, y) back to geographic coordinates (lat, lon)
-                    lon1, lat1 = proj_tmerc(ego_x, ego_y, inverse=True)
-                    manage_map(GNSS_flag=False, CAN_flag=True, fifo_path=fifo_path, latitude=lat1, longitude=lon1, heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer, station_id=arbitration_id, type=5)
+                for signal in message.signals:
+                    if 'angle' in signal.comment:
+                        if 'left' in signal.comment:
+                            angle_left_signal = signal
+                        elif 'right' in signal.comment:
+                            angle_right_signal = signal
+                    elif 'distance' in signal.comment:
+                        distance_signal = signal
+                if content and visualizer.getEgoPosition() is not None and angle_left_signal and angle_right_signal and distance_signal:
+                    if content[distance_signal.name] != 0.0:
+                        ego_lat, ego_lon, ego_heading = visualizer.getEgoPosition()
+                        distance = content[distance_signal.name]
+                        angle_left = content[angle_left_signal.name]
+                        angle_right = content[angle_right_signal.name]
+                        # Calculate the position of the object
+                        dx_v = distance - BUMPER_TO_SENSOR_DISTANCE + STANDARD_OBJECT_LENGTH / 2
+                        dist_left = dx_v / math.cos(angle_left)
+                        dist_right = dx_v / math.cos(angle_right)
+                        dy_left = dist_left * math.sin(angle_left)
+                        dy_right = dist_right * math.sin(angle_right)
+                        width = dy_right - dy_left
+                        dy_v = dy_left + width / 2
+                        # ETSI TS 103 324 V2.1.1 (2023-06) demands xDistance and yDistance to be with East as positive x and North as positive y
+                        ego_heading_cart = math.radians(90-ego_heading)  # The heading from the gps is relative to North --> 90 degrees from East
+                        dy_c = -dy_v  # Left to the sensor is negative in radar frame but positive in cartesian reference
+                        xDistance = dx_v * math.cos(ego_heading_cart) - dy_c * math.sin(ego_heading_cart)
+                        yDistance = dx_v * math.sin(ego_heading_cart) + dy_c * math.cos(ego_heading_cart)
+                        # Calculate the position of the object in the global reference frame
+                        utm_zone = int((ego_lon + 180) // 6) + 1  # Calculate UTM zone based on longitude
+                        proj_tmerc = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84', datum='WGS84')
+                        # Forward transformation: convert geographic coordinates (lat, lon) to projected (x, y)
+                        ego_x, ego_y = proj_tmerc(ego_lon, ego_lat)
+                        ego_x += xDistance
+                        ego_y += yDistance
+                        # Reverse transformation: convert projected (x, y) back to geographic coordinates (lat, lon)
+                        lon1, lat1 = proj_tmerc(ego_x, ego_y, inverse=True)
+                        manage_map(GNSS_flag=False, CAN_flag=True, fifo_path=fifo_path, latitude=lat1, longitude=lon1, heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer, station_id=arbitration_id, type=5)
+                    pass
+            start_time_us = start_time if start_time else 0
+            # Calculate the delta time in the recording between the current message and the start time
+            delta_time_us_simulation = d["timestamp"] - start_time_us
+            # Calculate the real time in microseconds from the beginning of the simulation to the current time
+            delta_time_us_real = time.time() * 1e6 - startup_time
+            # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
+            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+            try:
+                # Wait for the real time to be as close as possible to the simulation time
+                time.sleep(variable_delta_us_factor / 1e6)
+            except:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
-        start_time_us = start_time if start_time else 0
-        # Calculate the delta time in the recording between the current message and the start time
-        delta_time_us_simulation = d["timestamp"] - start_time_us
-        # Calculate the real time in microseconds from the beginning of the simulation to the current time
-        delta_time_us_real = time.time() * 1e6 - startup_time
-        # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
-        variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-        try:
-            # Wait for the real time to be as close as possible to the simulation time
-            time.sleep(variable_delta_us_factor / 1e6)
-        except:
-            # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-            pass
-        if end_time and time.time() * 1e6 - startup_time > end_time:
-            break
+            if end_time and time.time() * 1e6 - startup_time > end_time:
+                break
+    except Exception as e:
+        print(f"Error: {e}")
+    
+    finally:
+        if visualizer:
+            visualizer.stop_server(server_ip, server_port)
+
 
 def serial_gui(filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename=None, CAN_db=None):
     """
@@ -495,6 +511,7 @@ def serial_gui(filename, start_time, end_time, server_ip, server_port, fifo_path
             visualizer.stop_server(server_ip, server_port)
         if can_thread:
             can_thread.join()
+
 
 def write_serial(server_device, client_device, baudrate, filename, start_time, end_time):
     """
@@ -623,6 +640,7 @@ def write_CAN(device, filename, db_file, start_time, end_time):
         else:
             print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
 
+
 def main():
     """
     This script reads a json file with the following format:
@@ -670,7 +688,8 @@ def main():
     args.add_argument("--baudrate", type=int, help="The baudrate to write", default=115200)
     args.add_argument("--start-time", type=int, help="The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.", default=None)
     args.add_argument("--end-time", type=int, help="The time to stop reading in seconds, if not specified, will write until the endo fo the file", default=None)
-    args.add_argument("--enable-gui", action="store_true", help="Whether to display the GUI. Default is False", default=False)
+    args.add_argument("--enable-serial-gui", action="store_true", help="Whether to display the serial GUI. Default is False", default=False)
+    args.add_argument("--enable-CAN-gui", action="store_true", help="Whether to display the CAN GUI. Default is False", default=False)
     args.add_argument("--enable-test-rate", action="store_true", help="Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False", default=False)
     args.add_argument("--http-port", type=int, help="The port for the HTTP server. Default is 8080", default=8080)
     args.add_argument("--server-ip", type=str, help="The IP address of the server. Default is 127.0.0.1", default="127.0.0.1")
@@ -691,7 +710,8 @@ def main():
     baudrate = args.baudrate
     start_time = args.start_time * 1e6 if args.start_time else None
     end_time = args.end_time * 1e6 if args.end_time else None
-    gui = args.enable_gui
+    serial_gui = args.enable_serial_gui
+    CAN_gui = args.enable_CAN_gui
     httpport = args.http_port
     server_ip = args.server_ip
     server_port = args.server_port
@@ -709,7 +729,7 @@ def main():
     csv_filename = args.csv_filename
     csv_interpolation = args.csv_interpolation
 
-    assert serial > 0 or gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
+    assert serial > 0 or serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
     visualizer = None
     fifo_path = None
@@ -719,8 +739,6 @@ def main():
     csv_thread = None
     gui_thread = None
 
-    agent_type = "car"
-
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
         serial_thread = threading.Thread(
@@ -729,13 +747,13 @@ def main():
         serial_thread.daemon = True
         serial_thread.start()
 
-    if gui:
+    if CAN_gui:
+        assert serial_gui, "The serial GUI must be activated to display the CAN GUI"
+        assert os.path.exists(CAN_filename), "The file does not exist"
+        assert os.path.exists(CAN_db), "The CAN database file does not exist"
+
+    if serial_gui:
         assert os.path.exists(serial_filename), "The file does not exist"
-        CAN_gui = False
-        if os.path.exists(CAN_filename) and os.path.exists(CAN_db):
-            CAN_gui = True
-        else:
-            print("CAN GUI not activated")
         # Creation of the visualizer object
         visualizer = Visualizer()
         # If GUI modality is activated, start the nodejs server
@@ -773,8 +791,13 @@ def main():
     
     if csv:
         assert os.path.exists(serial_filename), "The file does not exist"
+        # Ask the user to insert the agent type
+        agent_type = input("Insert the agent type (car, vru): ")
+        assert agent_type in ["car", "vru"], "The agent type must be either car or vru"
+        agent_id = input("Insert the agent id: ")
+        assert agent_id, "The agent id must be inserted"
         csv_thread = threading.Thread(
-            target=csv_conversion, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time, 1, agent_type)
+            target=csv_conversion, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
         )
         csv_thread.daemon = True
         csv_thread.start()
@@ -782,7 +805,7 @@ def main():
     if serial:
         serial_thread.join()
 
-    if gui:
+    if serial_gui:
         gui_thread.join()
 
     if CAN:

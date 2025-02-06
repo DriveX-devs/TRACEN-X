@@ -34,17 +34,10 @@ class Visualizer:
         Sends a UDP message with the latitude, longitude, and heading to the specified server.
         """
         assert GNSS_flag or CAN_flag, "At least one of GNSS_flag or CAN"
-        id = -1
-        station_type = -1
-        if GNSS_flag:
-            id = 1
-            station_type = 5
-        elif CAN_flag:
-            id = 2
-            station_type = type
+        
         if not heading:
             heading = 361
-        message = f"object,{id},{lat},{lon},{station_type},{heading}"
+        message = f"object,{station_id},{lat},{lon},{type},{heading}"
         if GNSS_flag:
             self.ego_lat = lat
             self.ego_lon = lon
