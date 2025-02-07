@@ -40,7 +40,7 @@ It consists of two main scripts: `record/record.py` and `replay/replay.py`.
     ```
 4. Install the required Python packages:
    ```sh
-       pip install -r requirements.txt
+       pip install -r requirements
    ```
 
 5. [Optional] Install the required Python packages:
@@ -57,7 +57,7 @@ It consists of two main scripts: `record/record.py` and `replay/replay.py`.
         sudo apt-get install socat
     ```
 
-7. Ensure `nodejs` is installed on your system:
+7. Ensure `nodejs` is installed on your system (**IMPORTANT**: ensure to have at least v12.22.9; if you have an older version, you need to upgrade it manually following the instructions available [here](https://nodejs.org/en/download/).
     ```sh
         sudo apt install nodejs
     ```
