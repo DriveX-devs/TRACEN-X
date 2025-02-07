@@ -340,7 +340,7 @@ def test_rate(filename, start_time, end_time):
             [p for p in zip(update_timestamps, update_msg_type, update_periodicities, update_rates, update_msg_clustered, update_msg_same_position, update_msg_same_speed, update_msg_lat, update_msg_lon, update_msg_heading, update_msg_speed)],
             delimiter=',', fmt='%s'
         )
-        print("Data saved successfully")           
+        print("Data saved successfully")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -710,8 +710,8 @@ def main():
     baudrate = args.baudrate
     start_time = args.start_time * 1e6 if args.start_time else None
     end_time = args.end_time * 1e6 if args.end_time else None
-    serial_gui = args.enable_serial_gui
-    CAN_gui = args.enable_CAN_gui
+    enable_serial_gui = args.enable_serial_gui
+    enable_CAN_gui = args.enable_CAN_gui
     httpport = args.http_port
     server_ip = args.server_ip
     server_port = args.server_port
@@ -729,7 +729,7 @@ def main():
     csv_filename = args.csv_filename
     csv_interpolation = args.csv_interpolation
 
-    assert serial > 0 or serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
+    assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
     visualizer = None
     fifo_path = None
@@ -747,12 +747,12 @@ def main():
         serial_thread.daemon = True
         serial_thread.start()
 
-    if CAN_gui:
-        assert serial_gui, "The serial GUI must be activated to display the CAN GUI"
+    if enable_CAN_gui:
+        assert enable_serial_gui, "The serial GUI must be activated to display the CAN GUI"
         assert os.path.exists(CAN_filename), "The file does not exist"
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
 
-    if serial_gui:
+    if enable_serial_gui:
         assert os.path.exists(serial_filename), "The file does not exist"
         # Creation of the visualizer object
         visualizer = Visualizer()
@@ -761,7 +761,7 @@ def main():
         if not os.path.exists(fifo_path):
             os.mkfifo(fifo_path)
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
-        if CAN_gui:
+        if enable_CAN_gui:
             gui_thread = threading.Thread(
                 target=serial_gui, args=(serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
             )
@@ -805,7 +805,7 @@ def main():
     if serial:
         serial_thread.join()
 
-    if serial_gui:
+    if enable_serial_gui:
         gui_thread.join()
 
     if CAN:
