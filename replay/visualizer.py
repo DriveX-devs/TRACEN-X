@@ -7,7 +7,7 @@ class Visualizer:
         self.ego_lon = None
         self.ego_heading = None
 
-    def open_map_gui(self, lat, lon, server_ip, server_port):
+    def open_map_gui(self, lat: float, lon: float, server_ip: str, server_port: int):
         """
         Opens the map GUI.
         """
@@ -19,7 +19,7 @@ class Visualizer:
             print(f"Error sending UDP message: {e}")
             raise e
 
-    def start_nodejs_server(self, httpport, ip, port, fifo_path):
+    def start_nodejs_server(self, httpport: int, ip: str, port: int, fifo_path: str):
         """
         Starts the nodejs server for the vehicle visualizer.
         """
@@ -29,7 +29,7 @@ class Visualizer:
             print(f"Error starting nodejs server: {e}")
             raise e
 
-    def send_object_udp_message(self, GNSS_flag, CAN_flag, lat, lon, heading, server_ip, server_port, station_id=1, type=5):
+    def send_object_udp_message(self, GNSS_flag: bool, CAN_flag: bool, lat: float, lon: float, heading: float, server_ip: str, server_port: int, station_id: int = 1, type: int = 5):
         """
         Sends a UDP message with the latitude, longitude, and heading to the specified server.
         """
@@ -49,7 +49,7 @@ class Visualizer:
             print(f"Error sending UDP message: {e}")
             raise e
 
-    def stop_server(self, server_ip, server_port):
+    def stop_server(self, server_ip: str, server_port: int):
         """
         Stops the nodejs server for the vehicle visualizer.
         """
@@ -61,7 +61,7 @@ class Visualizer:
             print(f"Error stopping nodejs server: {e}")
             raise e
 
-    def getEgoPosition(self):
+    def getEgoPosition(self) -> tuple:
         if self.ego_lat is None or self.ego_lon is None or self.ego_heading is None:
             return None
         else:

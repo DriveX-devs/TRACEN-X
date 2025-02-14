@@ -29,17 +29,17 @@ SPEED_THRESHOLD = 15  # [m/s]
 AGE_THRESHOLD = 20  # [ms]
 
 
-def compare_floats(a, b):
+def compare_floats(a: float, b: float) -> bool:
     return math.isclose(a, b, rel_tol=1e-8)
 
 
-def filter_by_start_time(data, start_time):
+def filter_by_start_time(data, start_time: int) -> list:
     start_time_micseconds = start_time
     assert start_time_micseconds < data[-1]["timestamp"], "The start time is greater than the last timestamp in the file"
     return list(filter(lambda x: x["timestamp"] >= start_time_micseconds, data))
 
 
-def set_ubx_flag(ubx_type):
+def set_ubx_flag(ubx_type: str):
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
     if ubx_type is not None:
         if ubx_type == "NAV-PVT":
@@ -52,7 +52,7 @@ def set_ubx_flag(ubx_type):
             UBX_ESF_RAW_PRESENT = True
 
 
-def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, server_ip, server_port, visualizer, station_id=1, type=5):
+def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
     global MAP_OPENED
     try:
         if not MAP_OPENED:
@@ -76,7 +76,7 @@ def manage_map(GNSS_flag, CAN_flag, fifo_path, latitude, longitude, heading, ser
         raise e
     
 
-def print_test_rate_stats(average_update_time, average_update_time_filtered):
+def print_test_rate_stats(average_update_time: float, average_update_time_filtered: float):
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
     print("Average update periodicity:", average_update_time, "ms")
 
@@ -90,7 +90,7 @@ def print_test_rate_stats(average_update_time, average_update_time_filtered):
     print("UBX-ESF-RAW present:", UBX_ESF_RAW_PRESENT)
 
 
-def csv_conversion(filename, csv_filename, csv_interpolation, start_time, end_time, agent_id=1, agent_type="car"):
+def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
     """
     CSV function to store in a csv file the kinematic of the agent over the capture
     """
@@ -188,7 +188,7 @@ def csv_conversion(filename, csv_filename, csv_interpolation, start_time, end_ti
         print(f"Error: {e}")
 
 
-def test_rate(filename, start_time, end_time):
+def test_rate(filename: str, start_time: int, end_time: int):
     """
     Test rate function that calculates the update rate of the GNSS messages.
     """
@@ -345,7 +345,7 @@ def test_rate(filename, start_time, end_time):
         print(f"Error: {e}")
 
 
-def CAN_gui(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, fifo_path, visualizer):
+def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str, visualizer: Visualizer):
     """
     GUI function to display the data on the map.
     """
@@ -434,7 +434,7 @@ def CAN_gui(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, 
             visualizer.stop_server(server_ip, server_port)
 
 
-def serial_gui(filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename=None, CAN_db=None):
+def serial_gui(filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str, visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None):
     """
     GUI function to display the data on the map.
     """
@@ -513,7 +513,7 @@ def serial_gui(filename, start_time, end_time, server_ip, server_port, fifo_path
             can_thread.join()
 
 
-def write_serial(server_device, client_device, baudrate, filename, start_time, end_time):
+def write_serial(server_device: str, client_device: str, baudrate: int, filename: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the serial device.
     """
@@ -580,7 +580,7 @@ def write_serial(server_device, client_device, baudrate, filename, start_time, e
             print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
 
 
-def write_CAN(device, filename, db_file, start_time, end_time):
+def write_CAN(device: str, filename: str, db_file: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the CAN device.
     """

@@ -26,7 +26,7 @@ def signal_handler(sig, frame):
     print('\nTerminating...');
     TERMINATOR_FLAG = True
 
-def save_message(messages, res, timestamp, message_type):
+def save_message(messages: list, res: str, timestamp: float, message_type: str):
     """
     Saves a message to the provided list of messages.
     
@@ -52,7 +52,7 @@ def save_message(messages, res, timestamp, message_type):
     finally:
         messages.append(data)
 
-def write_to_file(f, messages):
+def write_to_file(f, messages: list):
     """
     Writes the list of messages to the specified file in JSON format.\n
     
@@ -66,7 +66,7 @@ def write_to_file(f, messages):
     print("Done...")
     f.close()
 
-def setup_file(filename):
+def setup_file(filename: str):
     """
     Sets up a file for writing by truncating its content.
     
@@ -85,7 +85,7 @@ def setup_file(filename):
 def close_file(f):
     f.close()
 
-def read_CAN_bus(CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time):
+def read_CAN_bus(CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
     """
     Reads the CAN bus and writes the messages to a file.
     
@@ -171,7 +171,7 @@ def read_CAN_bus(CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time
         if can_bus is not None:
             can_bus.shutdown()
 
-def read_serial(serial_filename, ser, end_time, real_time):
+def read_serial(serial_filename: str, ser: serial.Serial, end_time: int, real_time: bool):
     """
     Reads data from a serial device and writes the messages to a file.
 

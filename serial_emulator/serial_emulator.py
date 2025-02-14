@@ -1,7 +1,7 @@
 import subprocess, serial, time, os
 
 class SerialEmulator(object):
-    def __init__(self, device_port='./ttyNewDevice', client_port='./ttyNewClient', baudrate=115200):
+    def __init__(self, device_port: str = './ttyNewDevice', client_port: str = './ttyNewClient', baudrate: int = 115200):
         self.device_port = device_port
         self.client_port = client_port
         cmd=['/usr/bin/socat','-d','-d','PTY,link=%s,raw,echo=0' %
@@ -37,14 +37,14 @@ class SerialEmulator(object):
         self.err = ''
         self.out = ''
 
-    def write(self, out):
+    def write(self, out: bytes):
         try: 
             ret = self.serial_server.write(out)
             # print(ret)
         except:
             raise serial.SerialTimeoutException
 
-    def read(self):
+    def read(self) -> bytes:
         try:
             data = self.serial_client.read(1)
             return data
