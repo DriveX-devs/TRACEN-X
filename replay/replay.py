@@ -22,7 +22,7 @@ BUMPER_TO_SENSOR_DISTANCE = 1.54  # In [m]
 STANDARD_OBJECT_LENGTH = 4.24  # [m]
 STANDARD_OBJECT_WIDTH = 1.81  # [m]
 
-UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT = False, False, False, False
+UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT, UBX_NAV_STATUS_PRESENT = False, False, False, False, False
 
 METERS_PER_DEGREE_LATITUDE = 111320
 SPEED_THRESHOLD = 15  # [m/s]
@@ -40,7 +40,7 @@ def filter_by_start_time(data, start_time: int) -> list:
 
 
 def set_ubx_flag(ubx_type: str):
-    global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
+    global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT, UBX_NAV_STATUS_PRESENT
     if ubx_type is not None:
         if ubx_type == "NAV-PVT":
             UBX_NAV_PVT_PRESENT = True
@@ -50,6 +50,8 @@ def set_ubx_flag(ubx_type: str):
             UBX_ESF_INS_PRESENT = True
         if ubx_type == "ESF-RAW":
             UBX_ESF_RAW_PRESENT = True
+        if ubx_type == "NAV-STATUS":
+            UBX_NAV_STATUS_PRESENT = True
 
 
 def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
@@ -88,6 +90,7 @@ def print_test_rate_stats(average_update_time: float, average_update_time_filter
     print("UBX-NAV-ATT present:", UBX_NAV_ATT_PRESENT)
     print("UBX-ESF-INS present:", UBX_ESF_INS_PRESENT)
     print("UBX-ESF-RAW present:", UBX_ESF_RAW_PRESENT)
+    print("UBX-NAV-STATUS present:", UBX_NAV_STATUS_PRESENT)
 
 
 def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):

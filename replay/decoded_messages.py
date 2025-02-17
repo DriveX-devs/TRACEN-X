@@ -165,5 +165,7 @@ class DecodedMessage:
                 return "ESF-INS"
             elif(content[2]==0x10 and content[3]==0x03):
                 return "ESF-RAW"
+            elif(content[2]==0x01 and content[3]==0x03):
+                return "NAV-STATUS"
         else:
             return None
