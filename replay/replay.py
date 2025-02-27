@@ -11,7 +11,6 @@ from visualizer import Visualizer
 import os
 import cantools, can
 import pyproj
-import itertools
 
 sys.path.insert(1, './serial_emulator')
                 
