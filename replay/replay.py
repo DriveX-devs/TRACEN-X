@@ -11,6 +11,7 @@ from visualizer import Visualizer
 import os
 import cantools, can
 import pyproj
+import itertools
 
 sys.path.insert(1, './serial_emulator')
                 
@@ -292,13 +293,15 @@ def test_rate(filename: str, start_time: int, end_time: int):
         else:
             update_msg_clustered.append(-1000)
             update_msg_same_position.append(-1000)
-        
+
         if test_rate_speed:
             if compare_floats(prev_speed, test_rate_speed):
                 update_msg_same_speed.append(1)
             else:
                 update_msg_same_speed.append(0)
             prev_speed = test_rate_speed
+        else:
+            update_msg_same_speed.append(0)
 
         update_timestamps.append(d["timestamp"]/1e3)
 
@@ -334,7 +337,6 @@ def test_rate(filename: str, start_time: int, end_time: int):
         previous_time = d["timestamp"]
         if end_time and time.time() * 1e6 - startup_time > end_time:
             break
-
     try:
         print_test_rate_stats(average_update_time, average_update_time_filtered)
         print("Saving data to file statistics_out.csv")
