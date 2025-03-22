@@ -3,8 +3,6 @@ import argparse
 import json
 import threading
 import sys
-import numpy as np
-import pandas as pd
 import math
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
@@ -102,7 +100,17 @@ def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, st
     data = json.load(f)
     f.close()
 
-    df = pd.DataFrame(columns=["agent_id", "agent_type", "timeStamp_posix", "latitude_deg", "longitude_deg", "speed_ms", "heading_deg", "accel_ms2"])
+    # df = pd.DataFrame(columns=["agent_id", "agent_type", "timeStamp_posix", "latitude_deg", "longitude_deg", "speed_ms", "heading_deg", "accel_ms2"])
+    df = {
+        "agent_id": [],
+        "agent_type": [],
+        "timeStamp_posix": [],
+        "latitude_deg": [],
+        "longitude_deg": [],
+        "speed_ms": [],
+        "heading_deg": [],
+        "accel_ms2": []
+    }
 
     if start_time:
         data = filter_by_start_time(data, start_time)
@@ -147,7 +155,7 @@ def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, st
             if speed > SPEED_THRESHOLD and (d["timestamp"] - last_update_pos) / 1e3 > AGE_THRESHOLD:
                 pos_age = d["timestamp"] - last_update_pos
                 pos_age /= 1e3
-                interp_points = np.floor(pos_age / AGE_THRESHOLD)
+                interp_points = math.floor(pos_age / AGE_THRESHOLD)
                 heading_diff = heading - last_heading if last_heading else 0
                 for j in range(0, int(interp_points)):
                     t = last_update_pos + (j+1) * (AGE_THRESHOLD * 1e3)
@@ -167,7 +175,15 @@ def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, st
                     if not tmp_heading:
                         heading = interp_heading
                     last_heading = new_heading
-                    df.loc[len(df)] = [agent_id, agent_type, t, interp_lat, interp_lon, speed, interp_heading, acc]
+                    # df.loc[len(df)] = [agent_id, agent_type, t, interp_lat, interp_lon, speed, interp_heading, acc]
+                    df["agent_id"].append(agent_id)
+                    df["agent_type"].append(agent_type)
+                    df["timeStamp_posix"].append(t)
+                    df["latitude_deg"].append(interp_lat)
+                    df["longitude_deg"].append(interp_lon)
+                    df["speed_ms"].append(speed)
+                    df["heading_deg"].append(interp_heading)
+                    df["accel_ms2"].append(acc)
                     last_update_pos = t
                     i += 1
 
@@ -176,7 +192,15 @@ def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, st
         if tmp_lat and tmp_lon:
             last_update_pos = d["timestamp"]
         if lat and lon and heading and speed:
-            df.loc[len(df)] = [agent_id, agent_type, d["timestamp"], lat, lon, speed, heading, acc]
+            # df.loc[len(df)] = [agent_id, agent_type, d["timestamp"], lat, lon, speed, heading, acc]
+            df["agent_id"].append(agent_id)
+            df["agent_type"].append(agent_type)
+            df["timeStamp_posix"].append(d["timestamp"])
+            df["latitude_deg"].append(lat)
+            df["longitude_deg"].append(lon)
+            df["speed_ms"].append(speed)
+            df["heading_deg"].append(heading)
+            df["accel_ms2"].append(acc)
             i += 1
 
         if end_time and time.time() * 1e6 - start_time > end_time:
@@ -184,7 +208,15 @@ def csv_conversion(filename: str, csv_filename: str, csv_interpolation: bool, st
 
     try:
         print("Saving data to file", csv_filename)
-        df.to_csv(csv_filename, index=False)
+        # df.to_csv(csv_filename, index=False)
+        with open(csv_filename, 'w') as f:
+            # Write the header
+            f.write("agent_id,agent_type,timeStamp_posix,latitude_deg,longitude_deg,speed_ms,heading_deg,accel_ms2\n")
+            # Write each row by joining values with commas
+            for row in zip(df["agent_id"], df["agent_type"], df["timeStamp_posix"], df["latitude_deg"], df["longitude_deg"], df["speed_ms"], df["heading_deg"], df["accel_ms2"]):
+                # Convert all values to strings and join with commas
+                line = ','.join(str(value) for value in row)
+                f.write(line + '\n')
         print("Data saved successfully")
 
     except Exception as e:
@@ -339,11 +371,14 @@ def test_rate(filename: str, start_time: int, end_time: int):
     try:
         print_test_rate_stats(average_update_time, average_update_time_filtered)
         print("Saving data to file statistics_out.csv")
-        np.savetxt(
-            'statistics_out.csv', 
-            [p for p in zip(update_timestamps, update_msg_type, update_periodicities, update_rates, update_msg_clustered, update_msg_same_position, update_msg_same_speed, update_msg_lat, update_msg_lon, update_msg_heading, update_msg_speed)],
-            delimiter=',', fmt='%s'
-        )
+        with open('statistics_out.csv', 'w') as f:
+            # Write each row by joining values with commas
+            for row in zip(update_timestamps, update_msg_type, update_periodicities, update_rates, 
+                        update_msg_clustered, update_msg_same_position, update_msg_same_speed,
+                        update_msg_lat, update_msg_lon, update_msg_heading, update_msg_speed):
+                # Convert all values to strings and join with commas
+                line = ','.join(str(value) for value in row)
+                f.write(line + '\n')
         print("Data saved successfully")
     except Exception as e:
         print(f"Error: {e}")

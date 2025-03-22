@@ -1,4 +1,4 @@
-import subprocess, serial, time, os
+import subprocess, serial, time
 
 class SerialEmulator(object):
     def __init__(self, device_port: str = './ttyNewDevice', client_port: str = './ttyNewClient', baudrate: int = 115200):

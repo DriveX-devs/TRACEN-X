@@ -2,14 +2,16 @@
 
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
-It consists of two main scripts: `record/record.py` and `replay/replay.py`.
+It consists of three main scripts: `record/record.py`, `replay/replay.py`, and `merge_traces/union.py`.
 
 ## Features
 
-- **record.py**: Reads data from a Serial Device and/or a CAN Bus and saves it to a JSON file.
-- **replay.py**: Reads data from JSON files and emulates in real-time a Serial Device and/or a CAN Bus. If desired, it displays a GUI to visualize the vehicle and the objects perceived.
-- **serial_emulator.py**: Utility class to emulate a serial device using `socat`.
-- **decoded_messages**: Utility class to decode NMEA messages to extract latitude, longitude, and heading of vehicle.
+- **record/record.py**: Reads data from a Serial Device and/or a CAN Bus and saves it to a JSON file.
+- **replay/replay.py**: Reads data from JSON files and emulates in real-time a Serial Device and/or a CAN Bus. If desired, it displays a GUI to visualize the vehicle and the objects perceived.
+- **replay/decoded_messages.py**: Utility class to decode NMEA messages to extract latitude, longitude, and heading of vehicle.
+- **replay/vehicle_visualizer**: GUI to visualize the vehicle and the objects perceived.
+- **serial_emulator/serial_emulator.py**: Utility class to emulate a serial device using `socat`.
+- **merge_traces/union.py**: Utility class to merge multiple csv traces into a single one.
 
 ## Requirements
 
@@ -19,8 +21,6 @@ It consists of two main scripts: `record/record.py` and `replay/replay.py`.
 - nodejs (for GUI mode)
 - socat (for serial emulation)
 - cantools (for CAN Bus recording and reproducing)
-- pandas (for writing GNSS data into csv format)
-- numpy (for mathematical computations)
 - [Optional] can-utils (for testing CAN Bus features with "canplayer" and "candump")
 
 ## Installation
@@ -48,8 +48,6 @@ It consists of two main scripts: `record/record.py` and `replay/replay.py`.
         pip install pyserial
         pip install cantools
         pip install pyproj
-        pip install pandas
-        pip install numpy
     ```
 
 6. Ensure `socat` is installed on your system:
@@ -81,6 +79,13 @@ It consists of two main scripts: `record/record.py` and `replay/replay.py`.
 
 ## Usage
 
+The detailed usage of the scripts can be found by running the following commands:
+```sh
+    python3 record/record.py --help
+    python3 replay/replay.py --help
+    python3 merge_traces/union.py --help
+```
+
 ### Record
 
 Example of usage for the record script:
@@ -96,6 +101,13 @@ Example of usage for the replay script:
 ```sh
     python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 10 --end-time 50 --enable-gui --http-port 8080
     
+```
+
+### Merge Traces
+
+Example of usage for the merge traces script:
+```sh
+    python3 union.py --csv_files trace1.csv trace2.csv trace3.csv --output merged.csv --file_reference trace1.csv
 ```
 
 Follow the instructions inside the script to select the desired options.
