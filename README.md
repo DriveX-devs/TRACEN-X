@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="TRACEN-X_logo_v3.png" width="300"/>
+<img src="TRACEN-X_logo_v3.png" width="500"/>
   
 </div>
 
