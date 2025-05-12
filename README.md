@@ -6,7 +6,7 @@
   
 </div>
 
-<\br>
+
 
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
