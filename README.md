@@ -6,6 +6,8 @@
   
 </div>
 
+<\br>
+
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
 It consists of three main scripts: `record/record.py`, `replay/replay.py`, and `merge_traces/union.py`.
