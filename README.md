@@ -1,6 +1,8 @@
 # TRACEN-X: Telemetry Replay and Analysis of CAN bus and External Navigation data
 
 <div align="center">
+
+<img src="TRACEN-X_logo_v3.png" width="300"/>
   
 </div>
 
