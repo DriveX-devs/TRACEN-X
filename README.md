@@ -1,6 +1,6 @@
 # TRACEN-X: Telemetry Replay and Analysis of CAN bus and External Navigation data
 
-<img height="179.7" src="logo/TRACEN-X_logo.png" width="511.5"/>
+<img height="179.7" src="TRACEN-X_logo_v3.png" width="511.5"/>
 
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
