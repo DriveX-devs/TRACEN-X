@@ -1,5 +1,7 @@
 # TRACEN-X: Telemetry Replay and Analysis of CAN bus and External Navigation data
 
+<img height="179.7" src="logo/TRACEN-X_logo.png" width="511.5"/>
+
 This project is designed to record and replay GNSS serial data, specifically handling NMEA and UBX messages, and CAN Bus data. 
 
 It consists of three main scripts: `record/record.py`, `replay/replay.py`, and `merge_traces/union.py`.
