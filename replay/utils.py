@@ -8,9 +8,10 @@ import pyproj
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
 import threading
-from serial_emulator import SerialEmulator
 
 sys.path.insert(1, './serial_emulator')
+
+from serial_emulator import SerialEmulator
 
 CLUSTER_TSHOLD_MS = 20 # In [ms]
 MAP_OPENED = False
