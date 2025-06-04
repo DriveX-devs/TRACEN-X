@@ -1,4 +1,5 @@
-import socket, os
+import socket
+import os
 
 class Visualizer:
 

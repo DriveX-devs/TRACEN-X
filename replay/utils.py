@@ -1,13 +1,5 @@
 import math
 import sys
-import json
-import time
-import can
-import cantools
-import pyproj
-from decoded_messages import DecodedMessage
-from visualizer import Visualizer
-import threading
 
 sys.path.insert(1, './serial_emulator')
 

@@ -1,4 +1,7 @@
-from utils import *
+import utils
+import time
+import json
+from decoded_messages import DecodedMessage
 
 UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT, UBX_NAV_STATUS_PRESENT = False, False, False, False, False
 
@@ -44,7 +47,7 @@ def test_rate(filename: str, start_time: int, end_time: int):
     f.close()
 
     if start_time:
-        data = filter_by_start_time(data, start_time)
+        data = utils.filter_by_start_time(data, start_time)
 
     previous_time = 0 if not start_time else start_time
 
@@ -116,9 +119,9 @@ def test_rate(filename: str, start_time: int, end_time: int):
 
         # Check if the position update is clustered or not (based on the time and position)
         if test_rate_lat and test_rate_lon:
-            if delta_pos_time / 1e3 > CLUSTER_TSHOLD_MS or not compare_floats(prev_latitude_deg,
-                                                                              test_rate_lat) or not compare_floats(
-                    prev_longitude_deg, test_rate_lon):
+            if (delta_pos_time / 1e3 > utils.CLUSTER_TSHOLD_MS or not
+            utils.compare_floats(prev_latitude_deg, test_rate_lat) or not
+            utils.compare_floats(prev_longitude_deg, test_rate_lon)):
                 cnt_update_time_filtered = cnt_update_time_filtered + 1
                 average_update_time_filtered = average_update_time_filtered + (
                             delta_pos_time / 1e3 - average_update_time_filtered) / cnt_update_time_filtered
@@ -126,7 +129,7 @@ def test_rate(filename: str, start_time: int, end_time: int):
             else:
                 update_msg_clustered.append(1)
 
-            if compare_floats(prev_latitude_deg, test_rate_lat) and compare_floats(prev_longitude_deg, test_rate_lon):
+            if utils.compare_floats(prev_latitude_deg, test_rate_lat) and utils.compare_floats(prev_longitude_deg, test_rate_lon):
                 update_msg_same_position.append(1)
             else:
                 update_msg_same_position.append(0)
@@ -138,7 +141,7 @@ def test_rate(filename: str, start_time: int, end_time: int):
             update_msg_same_position.append(-1000)
 
         if test_rate_speed:
-            if compare_floats(prev_speed, test_rate_speed):
+            if utils.compare_floats(prev_speed, test_rate_speed):
                 update_msg_same_speed.append(1)
             else:
                 update_msg_same_speed.append(0)

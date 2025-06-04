@@ -1,18 +1,21 @@
-from utils import *
+import time
+import json
+import utils
+from serial_emulator import SerialEmulator
 
-def write_serial(server_device: str, client_device: str, baudrate: int, filename: str, start_time: int, end_time: int):
+def write_serial(server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the serial device.
     """
     try:
         # Creation of the serial emulator
         ser = SerialEmulator(device_port=server_device, client_port=client_device, baudrate=baudrate)
-        f = open(filename, "r")
+        f = open(input_filename, "r")
         data = json.load(f)
         f.close()
 
         if start_time:
-            data = filter_by_start_time(data, start_time)
+            data = utils.filter_by_start_time(data, start_time)
 
         previous_time = 0 if not start_time else start_time
 

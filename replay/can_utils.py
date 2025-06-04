@@ -1,17 +1,21 @@
-from utils import *
+import utils
+import can
+import cantools
+import time
+import json
 
-def write_CAN(device: str, filename: str, db_file: str, start_time: int, end_time: int):
+def write_CAN(device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the CAN device.
     """
     try:
         first_send = None
-        f = open(filename, "r")
+        f = open(input_filename, "r")
         data = json.load(f)
         f.close()
         # Filter the data by the start time
         if start_time:
-            data = filter_by_start_time(data, start_time)
+            data = utils.filter_by_start_time(data, start_time)
         # Load the CAN database
         db = cantools.database.load_file(db_file)
         # Create the CAN bus

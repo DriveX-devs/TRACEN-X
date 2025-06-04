@@ -1,4 +1,12 @@
-from utils import *
+import utils
+import json
+import math
+import time
+import cantools
+import pyproj
+import threading
+from decoded_messages import DecodedMessage
+from visualizer import Visualizer
 
 def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
     global MAP_OPENED
@@ -34,7 +42,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
         f.close()
         # Filter the data by the start time
         if start_time:
-            data = filter_by_start_time(data, start_time)
+            data = utils.filter_by_start_time(data, start_time)
         # Load the CAN database
         db = cantools.database.load_file(CAN_db)
         previous_time = 0 if not start_time else start_time
@@ -67,7 +75,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
                         angle_left = content[angle_left_signal.name]
                         angle_right = content[angle_right_signal.name]
                         # Calculate the position of the object
-                        dx_v = distance - BUMPER_TO_SENSOR_DISTANCE + STANDARD_OBJECT_LENGTH / 2
+                        dx_v = distance - utils.BUMPER_TO_SENSOR_DISTANCE + utils.STANDARD_OBJECT_LENGTH / 2
                         dist_left = dx_v / math.cos(angle_left)
                         dist_right = dx_v / math.cos(angle_right)
                         dy_left = dist_left * math.sin(angle_left)
@@ -116,7 +124,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
             visualizer.stop_server(server_ip, server_port)
 
 
-def serial_gui(filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
+def serial_gui(input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
                visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None):
     """
     GUI function to display the data on the map.
@@ -124,12 +132,12 @@ def serial_gui(filename: str, start_time: int, end_time: int, server_ip: str, se
 
     try:
         decoder = DecodedMessage()
-        f = open(filename, "r")
+        f = open(input_filename, "r")
         data = json.load(f)
         f.close()
 
         if start_time:
-            data = filter_by_start_time(data, start_time)
+            data = utils.filter_by_start_time(data, start_time)
 
         previous_time = 0 if not start_time else start_time
         latitude = None
