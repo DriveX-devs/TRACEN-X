@@ -1,9 +1,10 @@
+from scapy.layers.l2 import Ether
+from scapy.layers.inet import IP
+
 import utils
 import time
 import asn1tools as asn
 from scapy.all import *
-
-# write_pcap(input_filename="/Users/diego/Downloads/track_2_50kmh_refTimeFix 1.pcapng", interface="utun1", start_time=None, end_time=None)
 
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
@@ -48,7 +49,11 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
             # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
             pass
         try:
+            # converted_pkt = bytes(pkt)[4:]
+            # converted_pkt = Ether() / IP(converted_pkt)
             sendp(pkt, iface=interface, verbose=False)
         except Exception as e:
             print(f"Error: {e}")
 
+
+write_pcap(input_filename="/Users/diego/Downloads/track_2_50kmh_refTimeFix 1.pcapng", interface="utun1", start_time=None, end_time=None)
