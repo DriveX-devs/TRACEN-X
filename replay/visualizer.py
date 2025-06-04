@@ -62,7 +62,7 @@ class Visualizer:
             print(f"Error stopping nodejs server: {e}")
             raise e
 
-    def getEgoPosition(self) -> tuple:
+    def get_ego_position(self) -> tuple:
         if self.ego_lat is None or self.ego_lon is None or self.ego_heading is None:
             return None
         else:

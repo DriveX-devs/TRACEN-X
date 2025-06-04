@@ -7,21 +7,14 @@ from test_rate_utils import test_rate
 from can_utils import write_CAN
 from gui_utils import serial_gui
 from serial_utils import write_serial
+from pcap_utils import write_pcap
 
 def main():
     """
-    This script reads a json file with the following format:
-    
-    [
-        {
-            "timestamp": <time in microseconds>,
-            "type": <message type>,
-            "data": <message data>
-        },
-        ...
-    ]
+    Entry point for the data replay and emulation framework.
 
-    and writes the data to a serial device.
+    This script supports multiple replay modes including serial, CAN, CSV export, PCAP playback, and graphical visualization through a web-based GUI.
+    It initializes the selected emulation threads based on user-specified command-line arguments, ensuring synchronized and modular replay of recorded datasets for debugging, validation, or visualization purposes.
 
     Command-line Arguments:
     - --enable-serial (bool): Whether to enable the serial emulator. Default is False. Can be activated by writing it.
@@ -39,10 +32,13 @@ def main():
     - --enable-CAN (bool): Whether to enable the CAN emulator. Default is False. Can be activated by writing it.
     - --CAN-db (str): The CAN database file. Default is "./data/can_db/motohawk.dbc".
     - --CAN-device (str): The CAN device to write to. Default is "vcan0".
-    - --CAN-filename (str): The CAN file to read from. Default is "./data/CANlog.log".
+    - --CAN-filename (str): The CAN file to read from. Default is "./data/can_output/can_log.json".
     - --enable-csv (bool): Save the data to a csv file. Default is False. Can be activated by writing it.
-    - --csv-filename (str): The csv file to save the data to. Default is "./data/examples/example.csv".
-    - --csv-interpolation (bool): Interpolate the data to have a fixed information updating. Default is False. Can be activated by writing it.
+    - --csv-filename (str): The csv file to save the data to. Default is "./data/gnss_output/example.csv".
+    - --csv-interpolation (bool): Interpolate the data to have fixed information updating. Default is False. Can be activated by writing it.
+    - --enable-pcap (bool): Whether to enable the pcap reproduction. Default is False. Can be activated by writing it.
+    - --interface (str): The network interface to which write the pcap content. Default is "wlan0"
+    - --pcap-filename (str): The pcap file to read from for pcap emulation. Default is "./data/pcap_output/trace.pcapng".
 
     Example:
     python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080
@@ -54,7 +50,7 @@ def main():
     args.add_argument("--client-device", type=str, help="The device to read data from", default="./replay/ttyNewClient")
     args.add_argument("--baudrate", type=int, help="The baudrate to write", default=115200)
     args.add_argument("--start-time", type=int, help="The timestamp to start the reading in seconds. If not specified, will read from the beginning of the file.", default=None)
-    args.add_argument("--end-time", type=int, help="The time to stop reading in seconds, if not specified, will write until the endo fo the file", default=None)
+    args.add_argument("--end-time", type=int, help="The time to stop reading in seconds, if not specified, will write until the end of the file", default=None)
     args.add_argument("--enable-serial-gui", action="store_true", help="Whether to display the serial GUI. Default is False", default=False)
     args.add_argument("--enable-CAN-gui", action="store_true", help="Whether to display the CAN GUI. Default is False", default=False)
     args.add_argument("--enable-test-rate", action="store_true", help="Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False", default=False)
@@ -68,6 +64,9 @@ def main():
     args.add_argument("--enable-csv", action="store_true", help="Save the data to a csv file", default=False)
     args.add_argument("--csv-filename", type=str, help="The csv file to save the data to", default="./data/gnss_output/example.csv")
     args.add_argument("--csv-interpolation", action="store_true", help="Interpolate the data to have a fixed information updating", default=False)
+    args.add_argument("--enable-pcap", action="store_true", help="Enable pcap emulation", default=False)
+    args.add_argument("--interface", type=str, help="The network interface to which write the pcap content", default="wlan0")
+    args.add_argument("--pcap-filename", type=str, help="The pcap file to read the packets for the emulation", default="./data/pcap_output/trace.pcapng")
 
     args = args.parse_args()
     serial = args.enable_serial
@@ -75,6 +74,7 @@ def main():
     server_device = args.server_device
     client_device = args.client_device
     baudrate = args.baudrate
+    assert baudrate == 115200, "Baudrate must be 115200"
     start_time = args.start_time * 1e6 if args.start_time else None
     end_time = args.end_time * 1e6 if args.end_time else None
     enable_serial_gui = args.enable_serial_gui
@@ -96,7 +96,14 @@ def main():
     csv_filename = args.csv_filename
     csv_interpolation = args.csv_interpolation
 
-    assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
+    enable_pcap = args.enable_pcap
+    interface = args.interface
+    pcap_filename = args.pcap_filename
+
+    assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
+
+    if start_time and end_time:
+        assert end_time > start_time
 
     visualizer = None
     fifo_path = None
@@ -105,6 +112,7 @@ def main():
     test_rate_thread = None
     csv_thread = None
     gui_thread = None
+    pcap_thread = None
 
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
@@ -169,6 +177,12 @@ def main():
         csv_thread.daemon = True
         csv_thread.start()
 
+    if enable_pcap:
+        assert os.path.exists(pcap_filename)
+        pcap_thread = threading.Thread(target=write_pcap, args=(pcap_filename, interface, start_time, end_time))
+        pcap_thread.daemon = True
+        pcap_thread.start()
+
     if serial:
         serial_thread.join()
 
@@ -183,6 +197,9 @@ def main():
     
     if csv:
         csv_thread.join()
+
+    if enable_pcap:
+        pcap_thread.join()
     
 
 if __name__ == "__main__":

@@ -35,6 +35,17 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
             fifo_path: str, visualizer: Visualizer):
     """
     GUI function to display the data on the map.
+
+    Parameters:
+    - CAN_filename (str): Path to the CAN log file (e.g., JSON format with decoded CAN messages).
+    - CAN_db (str): Path to the DBC file used to decode CAN messages.
+    - start_time (int): Start time in microseconds for filtering the data to visualize.
+    - end_time (int): End time in microseconds for filtering the data to visualize.
+    - server_ip (str): IP address of the server to which data might be streamed.
+    - server_port (int): Port on the server for data communication.
+    - fifo_path (str): Path to a FIFO pipe used for inter-process communication (e.g., to feed data to another tool).
+    - visualizer (Visualizer): Visualizer object responsible for rendering data on the GUI/map.
+
     """
     try:
         f = open(CAN_filename, "r")
@@ -68,9 +79,9 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
                             angle_right_signal = signal
                     elif 'distance' in signal.comment:
                         distance_signal = signal
-                if content and visualizer.getEgoPosition() is not None and angle_left_signal and angle_right_signal and distance_signal:
+                if content and visualizer.get_ego_position() is not None and angle_left_signal and angle_right_signal and distance_signal:
                     if content[distance_signal.name] != 0.0:
-                        ego_lat, ego_lon, ego_heading = visualizer.getEgoPosition()
+                        ego_lat, ego_lon, ego_heading = visualizer.get_ego_position()
                         distance = content[distance_signal.name]
                         angle_left = content[angle_left_signal.name]
                         angle_right = content[angle_right_signal.name]
@@ -108,10 +119,10 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
             delta_time_us_real = time.time() * 1e6 - startup_time
             # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
             variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            try:
+            if variable_delta_us_factor > 0:
                 # Wait for the real time to be as close as possible to the simulation time
                 time.sleep(variable_delta_us_factor / 1e6)
-            except:
+            else:
                 # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
             if end_time and time.time() * 1e6 - startup_time > end_time:
@@ -128,6 +139,17 @@ def serial_gui(input_filename: str, start_time: int, end_time: int, server_ip: s
                visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None):
     """
     GUI function to display the data on the map.
+
+    Parameters:
+    - input_filename (str): Path to the GNSS serial log file (e.g., JSON format).
+    - start_time (int): Start time in microseconds for filtering the data to visualize.
+    - end_time (int): End time in microseconds for filtering the data to visualize.
+    - server_ip (str): IP address of the server to which data may be streamed.
+    - server_port (int): Port number for the server communication.
+    - fifo_path (str): Path to a FIFO pipe used for inter-process communication.
+    - visualizer (Visualizer): Visualizer object responsible for rendering the data on the GUI/map.
+    - CAN_filename (str, optional): Path to the CAN log file (if CAN data should be included). Default is None.
+    - CAN_db (str, optional): Path to the DBC file used to decode CAN messages. Required if CAN_filename is provided. Default is None.
     """
 
     try:

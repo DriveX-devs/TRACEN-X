@@ -7,6 +7,14 @@ import json
 def write_CAN(device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the CAN device.
+
+    Parameters:
+    - device (str): The name of the CAN device/interface to send messages to (e.g., "vcan0" or "can0").
+    - input_filename (str): Path to the CAN log file (e.g., JSON or ASC format) containing messages to be replayed.
+    - db_file (str): Path to the DBC file used for encoding/decoding CAN messages.
+    - start_time (int): The start time (in microseconds) relative to the beginning of the capture for replaying messages.
+    - end_time (int): The end time (in microseconds) relative to the beginning of the capture; messages after this time will be ignored.
+
     """
     try:
         first_send = None
@@ -40,10 +48,10 @@ def write_CAN(device: str, input_filename: str, db_file: str, start_time: int, e
             delta_time_us_real = time.time() * 1e6 - startup_time
             # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
             variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            try:
+            if variable_delta_us_factor > 0:
                 # Wait for the real time to be as close as possible to the simulation time
                 time.sleep(variable_delta_us_factor / 1e6)
-            except:
+            else:
                 # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
             if message:

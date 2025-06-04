@@ -2,6 +2,7 @@ import serial
 import argparse
 import signal
 import threading
+import os
 from pcap_utils import sniff_pkt
 from serial_utils import read_serial
 from can_utils import read_CAN_bus
@@ -9,7 +10,11 @@ import utils
 
 def main():
     """
-    Main function to read data from a serial device and save it to a file.
+    Entry point for the data recording framework.
+
+    This script allows simultaneous logging of serial, CAN, and PCAP data from various sources.
+    It supports real-time serial emulation, reads from hardware interfaces or log files, and writes structured outputs for later analysis or replay. Modules run in parallel threads based on the selected command-line options.
+
     
     Command-line Arguments:
     - --enable-serial (bool): Enable serial logging. Default is False. Can be activated by writing it.
@@ -64,7 +69,10 @@ def main():
         CAN_device = args.CAN_device
         CAN_filename = args.CAN_filename
         CAN_db = args.CAN_db
+        assert os.path.exists(CAN_db), "CAN db does not exist"
         CAN_log_file_source = args.CAN_log_file_source
+        if CAN_log_file_source:
+            assert os.path.exists(CAN_log_file_source), "CAN log file source does not exist"
         # Start thread to read CAN bus
         candump_thread = threading.Thread(target=read_CAN_bus, args=(CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
         # Set the thread as a daemon so it will be killed when the main thread exits
@@ -75,6 +83,7 @@ def main():
         device = args.serial_device
         serial_filename = args.serial_filename
         baudrate = args.baudrate
+        assert baudrate == 115200, "Baudrate must be 115200"
         real_time = args.real_time_serial
         ser = serial.Serial(
             port=device,

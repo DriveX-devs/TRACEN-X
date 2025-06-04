@@ -20,6 +20,7 @@ def set_ubx_flag(ubx_type: str):
         if ubx_type == "NAV-STATUS":
             UBX_NAV_STATUS_PRESENT = True
 
+
 def print_test_rate_stats(average_update_time: float, average_update_time_filtered: float):
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
     print("Average update periodicity:", average_update_time, "ms")
@@ -38,6 +39,11 @@ def print_test_rate_stats(average_update_time: float, average_update_time_filter
 def test_rate(filename: str, start_time: int, end_time: int):
     """
     Test rate function that calculates the update rate of the GNSS messages.
+
+    Parameters:
+    - filename (str): Path to the file containing GNSS log data (e.g., JSON format with timestamps).
+    - start_time (int): Start time in microseconds; messages with timestamps before this will be ignored.
+    - end_time (int): End time in microseconds; messages with timestamps after this will be ignored.
     """
     global UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT
 
@@ -124,12 +130,13 @@ def test_rate(filename: str, start_time: int, end_time: int):
             utils.compare_floats(prev_longitude_deg, test_rate_lon)):
                 cnt_update_time_filtered = cnt_update_time_filtered + 1
                 average_update_time_filtered = average_update_time_filtered + (
-                            delta_pos_time / 1e3 - average_update_time_filtered) / cnt_update_time_filtered
+                        delta_pos_time / 1e3 - average_update_time_filtered) / cnt_update_time_filtered
                 update_msg_clustered.append(0)
             else:
                 update_msg_clustered.append(1)
 
-            if utils.compare_floats(prev_latitude_deg, test_rate_lat) and utils.compare_floats(prev_longitude_deg, test_rate_lon):
+            if utils.compare_floats(prev_latitude_deg, test_rate_lat) and utils.compare_floats(prev_longitude_deg,
+                                                                                               test_rate_lon):
                 update_msg_same_position.append(1)
             else:
                 update_msg_same_position.append(0)

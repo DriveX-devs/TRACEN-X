@@ -6,7 +6,16 @@ from decoded_messages import DecodedMessage
 
 def csv_conversion(input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
     """
-    CSV function to store in a csv file the kinematic of the agent over the capture
+    CSV function to store in a csv file the kinematic of the agent over the capture.
+
+    Parameters:
+    - input_filename (str): Path to the input log file (e.g., GNSS or sensor data in JSON).
+    - csv_filename (str): Path to the output CSV file to store the converted data.
+    - csv_interpolation (bool): Whether to interpolate missing or irregular timestamp entries in the dataset.
+    - start_time (int): Start time in microseconds for filtering the data to be written.
+    - end_time (int): End time in microseconds for filtering the data to be written.
+    - agent_id (int, optional): Numerical identifier for the agent being tracked. Default is 1.
+    - agent_type (str, optional): Type of agent (e.g., "car", "vru"). Default is "car".
     """
     decoder = DecodedMessage()
     f = open(input_filename, "r")
