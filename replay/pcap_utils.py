@@ -6,10 +6,68 @@ import time
 import asn1tools as asn
 from scapy.all import *
 
+GEONET_LENGTH = 40
+ETHER_LENGTH = 14
+GEONET_TS_LOW = 20
+GEONET_TS_HIGH = 24
+BTP_LOW = 40
+BTP_HIGH = 44
+BTP_PORT_HIGH = 2
+
+
+TIME_SHIFT = 1072915200000
+TS_MAX1 = 4294967296
+MODULO_WRAP = 4398046511103
+MODULO_CAM_VAM = 65536
+
+PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
+
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 CPM = asn.compile_files(cpm_asn, 'uper')
 VAM = asn.compile_files(vam_asn, "uper")
+
+def get_timestamp_ms(purpose: str) -> int:
+
+    if purpose == "CPM" or purpose == "GeoNet":
+        try:
+            now = time.clock_gettime_ns(time.CLOCK_TAI)
+        except AttributeError:
+            print("CLOCK_TAI not supported on this platform.")
+            exit(-1)
+        except OSError as e:
+            print("Cannot get the current microseconds TAI timestamp:", e)
+            exit(-1)
+        except Exception as e:
+            print(f"Error: {e}")
+            exit(-1)
+        
+        assert purpose in PURPOSES, f"Verify that the purpose for timestamp computation is in {PURPOSES}"
+        
+        # Convert to seconds + microseconds
+        seconds = now // 1e9
+        microseconds = round((now % 1e9) / 1e3)
+        
+        # Adjust for overflow due to rounding
+        if microseconds > 999_999:
+            seconds += 1
+            microseconds = 0
+
+        # Compute total milliseconds
+        millis = math.floor((seconds * 1e6 + microseconds) / 1e3)
+
+        # Apply ITS epoch and ETSI wraparound
+        return int((millis - TIME_SHIFT) % MODULO_WRAP) if purpose == "CPM" else int((millis - TIME_SHIFT) % TS_MAX1)
+    elif purpose == "VAM" or purpose == "CAM":
+        try:
+            now = int(time.time() * 1e3)
+        except Exception as e:
+            print(f"Error: {e}")
+            exit(-1)
+        return (now - TIME_SHIFT) % MODULO_CAM_VAM
+    
+    return -1
+
 
 def write_pcap(input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool):
     """
@@ -27,6 +85,13 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
     # start_time_us represents the time in microseconds from the beginning of the messages simulation to the start time selected by the user
     start_time_us = start_time if start_time else 0
 
+    # Socket preparation
+    try:
+        sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
+        sock.bind((interface, 0))
+    except Exception as e:
+        print(f"Error: {e}")
+
     base_ts = pcap[0].time  # epoch time in seconds
     startup_time = time.time() * 1e6
     for i, pkt in enumerate(pcap):
@@ -38,19 +103,52 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
             break
 
         if update_datetime:
-            pass
+            raw_part = None
+            try:
+                ether_part = raw(pkt)[:ETHER_LENGTH]
+                data = raw(pkt)[ETHER_LENGTH:]
+                geonet = data[:GEONET_LENGTH]
+                current_timestamp = get_timestamp_ms(purpose="GeoNet")
+                assert current_timestamp > 0, "Error in time calculation"
+                current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
+                new_geonet = geonet[:GEONET_TS_LOW] + current_timestamp + geonet[GEONET_TS_HIGH:]
 
-        sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
-        sock.bind((interface, 0))
-        sock.send(raw(pkt))
-        exit(0)
-        dest = pkt[Ether].dst
-        source = pkt[Ether].src
-        eth_type = hex(pkt[Ether].type)
-        dest_port = pkt["BTP"].src
-        payload = raw(pkt[Raw].load)  # strip and reattach payload cleanly
+                btp = data[BTP_LOW : BTP_HIGH]
+                port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
+                mex_encoded = None
+                if port == 2009:
+                    # CPM
+                    cpm_bytes = data[BTP_HIGH:]
+                    cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
+                    reference_time = get_timestamp_ms(purpose="CPM")
+                    assert reference_time > 0, "Error in time calculation"
+                    cpm["payload"]["managementContainer"]["referenceTime"] = reference_time
+                    mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
+                elif port == 2001:
+                    # CAM
+                    continue
+                elif port == 2018:
+                    # VAM
+                    vam_bytes = data[BTP_HIGH:]
+                    vam = VAM.decode("VAM", vam_bytes)
+                    generation_delta_time = get_timestamp_ms(purpose="VAM")
+                    assert generation_delta_time > 0, "Error in time calculation"
+                    vam["vam"]["generationDeltaTime"] = generation_delta_time
+                    mex_encoded = VAM.encode("VAM", vam)
 
-        packet = (dest + source + eth_type + geonet_header + btp_header + payload)
+                assert mex_encoded is not None, "Something went wrong in the message modifications"
+
+                raw_part = new_geonet + btp + mex_encoded
+
+                if ether_part and raw_part:
+                    pkt = ether_part + raw_part
+
+            except Exception as e:
+                # Malformed packet
+                continue
+        else:
+            pkt = raw(pkt)
+                
 
         delta_time_us_real = time.time() * 1e6 - startup_time
         delta_time_us_simulation = pkt_ts_us - start_time_us
@@ -63,12 +161,9 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
             # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
             pass
         try:
-            # converted_pkt = bytes(pkt)[4:]
-            # converted_pkt = Ether() / IP(converted_pkt)
-            sendp(raw(full_pkt), iface=interface, verbose=False)
-            exit(0)
+            sock.send(pkt)
         except Exception as e:
             print(f"Error: {e}")
 
 
-write_pcap(input_filename="/Users/diego/Downloads/track_2_50kmh_refTimeFix 1.pcapng", interface="utun1", start_time=None, end_time=None, update_datetime=False)
+# write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
