@@ -120,9 +120,29 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
                     # CPM
                     cpm_bytes = data[BTP_HIGH:]
                     cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
-                    reference_time = get_timestamp_ms(purpose="CPM")
-                    assert reference_time > 0, "Error in time calculation"
-                    cpm["payload"]["managementContainer"]["referenceTime"] = reference_time
+                    old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
+                    new_reference_time = get_timestamp_ms(purpose="CPM")
+                    assert new_reference_time > 0, "Error in time calculation"
+                    cpm["payload"]["managementContainer"]["referenceTime"] = new_reference_time
+
+                    if "InterferenceManagementZones" in cpm["payload"]:
+                        zones = cpm["payload"]["InterferenceManagementZones"]
+                        for zone in zones:
+                            if "managementInfo" in zone:
+                                for info in zone["managementInfo"]:
+                                    if "expiryTime" in info:
+                                        old_expiry_time = info["expiryTime"]
+                                        delta = old_expiry_time - old_reference_time
+                                        info["expiryTime"] = new_reference_time + delta
+                    
+                    if "ProtectedCommunicationZonesRSU" in cpm["payload"]:
+                        zones = cpm["payload"]["ProtectedCommunicationZonesRSU"]
+                        for zone in zones:
+                            if "expiryTime" in zone:
+                                old_expiry_time = zone["expiryTime"]
+                                delta = old_expiry_time - old_reference_time
+                                zone["expiryTime"] = new_reference_time + delta
+                    
                     mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
                 elif port == 2001:
                     # CAM
@@ -131,9 +151,22 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
                     # VAM
                     vam_bytes = data[BTP_HIGH:]
                     vam = VAM.decode("VAM", vam_bytes)
-                    generation_delta_time = get_timestamp_ms(purpose="VAM")
-                    assert generation_delta_time > 0, "Error in time calculation"
-                    vam["vam"]["generationDeltaTime"] = generation_delta_time
+                    old_reference_time = vam["vam"]["generationDeltaTime"]
+                    new_reference_time = get_timestamp_ms(purpose="VAM")
+                    assert new_reference_time > 0, "Error in time calculation"
+                    vam["vam"]["generationDeltaTime"] = new_reference_time
+
+                    if "InterferenceManagementZones" in vam["vam"]:
+                        zones = vam["vam"]["InterferenceManagementZones"]
+                        for zone in zones:
+                            if "managementInfo" in zone:
+                                management_info_list = zone["managementInfo"]
+                                for info in management_info_list:
+                                    if "expiryTime" in info:
+                                        old_expiry = info["expiryTime"]
+                                        delta = old_expiry - old_reference_time
+                                        info["expiryTime"] = new_reference_time + delta
+
                     mex_encoded = VAM.encode("VAM", vam)
 
                 assert mex_encoded is not None, "Something went wrong in the message modifications"
@@ -166,4 +199,6 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
             print(f"Error: {e}")
 
 
-# write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
+write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
+
+#write_pcap(input_filename="/home/diego/TRACEN-X/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
