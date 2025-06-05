@@ -37,11 +37,12 @@ def main():
     - --csv-filename (str): The csv file to save the data to. Default is "./data/gnss_output/example.csv".
     - --csv-interpolation (bool): Interpolate the data to have fixed information updating. Default is False. Can be activated by writing it.
     - --enable-pcap (bool): Whether to enable the pcap reproduction. Default is False. Can be activated by writing it.
-    - --interface (str): The network interface to which write the pcap content. Default is "wlan0"
+    - --interface (str): The network interface to which write the pcap content. Default is "wlan0".
     - --pcap-filename (str): The pcap file to read from for pcap emulation. Default is "./data/pcap_output/trace.pcapng".
+    - --update-datetime (bool): If the emulation of pcap trace must update the packets datetime to the current one. Default is False.
 
     Example:
-    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080
+    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime
     """
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial emulator")
@@ -57,16 +58,17 @@ def main():
     args.add_argument("--http-port", type=int, help="The port for the HTTP server. Default is 8080", default=8080)
     args.add_argument("--server-ip", type=str, help="The IP address of the server. Default is 127.0.0.1", default="127.0.0.1")
     args.add_argument("--server-port", type=int, help="The port of the server. Default is 48110", default=48110)
-    args.add_argument("--enable-CAN", action="store_true", help="Enable CAN emulator", default=False)
+    args.add_argument("--enable-CAN", action="store_true", help="Enable CAN emulator. Default is False", default=False)
     args.add_argument("--CAN-db", type=str, help="The CAN database file", default="./data/can_db/motohawk.dbc")
     args.add_argument("--CAN-device", type=str, help="The CAN device to write to", default="vcan0")
     args.add_argument("--CAN-filename", type=str, help="The CAN file to read from", default="./data/can_output/can_log.json")
-    args.add_argument("--enable-csv", action="store_true", help="Save the data to a csv file", default=False)
+    args.add_argument("--enable-csv", action="store_true", help="Save the data to a csv file. Default is False", default=False)
     args.add_argument("--csv-filename", type=str, help="The csv file to save the data to", default="./data/gnss_output/example.csv")
-    args.add_argument("--csv-interpolation", action="store_true", help="Interpolate the data to have a fixed information updating", default=False)
-    args.add_argument("--enable-pcap", action="store_true", help="Enable pcap emulation", default=False)
+    args.add_argument("--csv-interpolation", action="store_true", help="Interpolate the data to have a fixed information updating. Default is False", default=False)
+    args.add_argument("--enable-pcap", action="store_true", help="Enable pcap emulation. Default is False", default=False)
     args.add_argument("--interface", type=str, help="The network interface to which write the pcap content", default="wlan0")
     args.add_argument("--pcap-filename", type=str, help="The pcap file to read the packets for the emulation", default="./data/pcap_output/trace.pcapng")
+    args.add_argument("--update-datetime", action="store_true", help="If the emulation of pcap trace must update the packets datetime to the current one. Default is False", default=False)
 
     args = args.parse_args()
     serial = args.enable_serial
@@ -99,6 +101,7 @@ def main():
     enable_pcap = args.enable_pcap
     interface = args.interface
     pcap_filename = args.pcap_filename
+    update_datetime = args.update_datetime
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
@@ -179,7 +182,7 @@ def main():
 
     if enable_pcap:
         assert os.path.exists(pcap_filename)
-        pcap_thread = threading.Thread(target=write_pcap, args=(pcap_filename, interface, start_time, end_time))
+        pcap_thread = threading.Thread(target=write_pcap, args=(pcap_filename, interface, start_time, end_time, update_datetime))
         pcap_thread.daemon = True
         pcap_thread.start()
 
