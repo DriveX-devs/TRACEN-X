@@ -3,16 +3,18 @@ import sys
 import serial
 import time
 from collections import deque
+from typing import Any
 
 sys.path.insert(1, './serial_emulator')
 
 from serial_emulator import SerialEmulator
 
-def read_serial(serial_filename: str, ser: serial.Serial, end_time: int, real_time: bool):
+def read_serial(stop_event: Any, serial_filename: str, ser: serial.Serial, end_time: int, real_time: bool):
     """
     Reads data from a serial device and writes the messages to a file.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - serial_filename (str): The file to write to.
     - ser (serial.Serial): The serial object to read from.
     - end_time (int): The time to stop reading in seconds.
@@ -103,7 +105,7 @@ def read_serial(serial_filename: str, ser: serial.Serial, end_time: int, real_ti
             else:
                 queue += data
             t = time.time()
-            if (end_time is not None and t > end_time) or utils.TERMINATOR_FLAG:
+            if (end_time is not None and t > end_time) or stop_event.is_set():
                 break
             previous_data = data
     except Exception as e:

@@ -1,13 +1,15 @@
 import time
 import json
 import utils
+from typing import Any
 from serial_emulator import SerialEmulator
 
-def write_serial(server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):
+def write_serial(stop_event: Any, server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the serial device.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - server_device (str): The path to the serial device that acts as the data sender (e.g., "/dev/pts/3").
     - client_device (str): The path to the paired virtual serial device (acts as receiver), if applicable.
     - baudrate (int): Baud rate for the serial communication (e.g., 115200).
@@ -65,7 +67,7 @@ def write_serial(server_device: str, client_device: str, baudrate: int, input_fi
             if first_send is None:
                 first_send = time.time()
             previous_time = d["timestamp"]
-            if end_time and time.time() * 1e6 - startup_time > end_time:
+            if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
                 break
 
     except Exception as e:

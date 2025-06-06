@@ -1,12 +1,19 @@
 import serial
 import argparse
 import signal
-import threading
+from multiprocessing import Process, Event
 import os
 from pcap_utils import sniff_pkt
 from serial_utils import read_serial
 from can_utils import read_CAN_bus
 import utils
+
+def signal_handler(sig, frame, stop_event):
+    """
+    Signal handler for the SIGINT signal.
+    """
+    print("\nTerminating...")
+    stop_event.set()
 
 def main():
     """
@@ -50,7 +57,8 @@ def main():
     args.add_argument("--interface", type=str, help="The interface to read from", default="wlan0")
     args.add_argument("--pcap-filename", type=str, help="The pcap file to write to", default="./data/pcap_output/trace.pcapng")
 
-    signal.signal(signal.SIGINT, utils.signal_handler)
+    stop_event = Event()
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
     args = args.parse_args()
     enable_serial = args.enable_serial
@@ -61,9 +69,9 @@ def main():
 
     end_time = args.end_time
 
-    candump_thread = None
-    serial_thread = None
-    pcap_thread = None
+    candump_process = None
+    serial_process = None
+    pcap_process = None
 
     if enable_CAN:
         CAN_device = args.CAN_device
@@ -74,10 +82,9 @@ def main():
         if CAN_log_file_source:
             assert os.path.exists(CAN_log_file_source), "CAN log file source does not exist"
         # Start thread to read CAN bus
-        candump_thread = threading.Thread(target=read_CAN_bus, args=(CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
+        candump_process = Process(target=read_CAN_bus, args=(stop_event, CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
         # Set the thread as a daemon so it will be killed when the main thread exits
-        candump_thread.daemon = True
-        candump_thread.start()
+        candump_process.start()
 
     if enable_serial:
         device = args.serial_device
@@ -94,25 +101,30 @@ def main():
             timeout=0
         )
         # Start the read serial function
-        serial_thread = threading.Thread(target=read_serial, args=(serial_filename, ser, end_time, real_time))
-        serial_thread.daemon = True
-        serial_thread.start()
+        serial_process = Process(target=read_serial, args=(stop_event, serial_filename, ser, end_time, real_time))
+        serial_process.start()
 
     if enable_pcap:
         interface = args.interface
         pcap_filename = args.pcap_filename
-        pcap_thread = threading.Thread(target=sniff_pkt, args=(pcap_filename, interface))
-        pcap_thread.daemon = True
-        pcap_thread.start()
+        pcap_process = Process(target=sniff_pkt, args=(stop_event, pcap_filename, interface))
+        pcap_process.start()
 
-    if enable_CAN:
-        candump_thread.join()
+    try:
+        if enable_CAN:
+            candump_process.join()
 
-    if enable_serial:
-        serial_thread.join()
+        if enable_serial:
+            serial_process.join()
 
-    if enable_pcap:
-        pcap_thread.join()
+        if enable_pcap:
+            pcap_process.join()
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+        stop_event.set()
+        if candump_process: candump_process.join()
+        if serial_process: serial_process.join()
+        if pcap_process: pcap_process.join()
 
 
 if __name__ == "__main__":

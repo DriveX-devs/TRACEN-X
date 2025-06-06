@@ -7,6 +7,9 @@ import pyproj
 import threading
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
+from typing import Any
+
+MAP_OPENED = False
 
 def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
     global MAP_OPENED
@@ -135,12 +138,13 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
             visualizer.stop_server(server_ip, server_port)
 
 
-def serial_gui(input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
+def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
                visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None):
     """
     GUI function to display the data on the map.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - input_filename (str): Path to the GNSS serial log file (e.g., JSON format).
     - start_time (int): Start time in microseconds for filtering the data to visualize.
     - end_time (int): End time in microseconds for filtering the data to visualize.
@@ -173,9 +177,8 @@ def serial_gui(input_filename: str, start_time: int, end_time: int, server_ip: s
         # If CAN GUI is enabled, start the CAN GUI function in a separate thread
         can_thread = None
         if CAN_filename and CAN_db:
-            can_thread = threading.Thread(target=CAN_gui, args=(
-            CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, fifo_path, visualizer))
-            can_thread.daemon = True
+            can_thread = threading.Thread(
+                target=CAN_gui, args=(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, fifo_path, visualizer), daemon=True)
             can_thread.start()
 
         for d in data:
@@ -206,17 +209,18 @@ def serial_gui(input_filename: str, start_time: int, end_time: int, server_ip: s
             start_time_us = start_time if start_time else 0
             delta_time_us_simulation = d["timestamp"] - start_time_us
             variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            try:
+            if variable_delta_us_factor > 0:
                 time.sleep(variable_delta_us_factor / 1e6)
-            except:
-                print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+            else:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                pass
             if first_send is None:
                 first_send = time.time()
             previous_time = d["timestamp"]
             if latitude and longitude:
                 manage_map(GNSS_flag=True, CAN_flag=False, fifo_path=fifo_path, latitude=latitude, longitude=longitude,
                            heading=heading, server_ip=server_ip, server_port=server_port, visualizer=visualizer)
-            if end_time and time.time() * 1e6 - startup_time > end_time:
+            if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
                 break
     except Exception as e:
         print(f"Error: {e}")

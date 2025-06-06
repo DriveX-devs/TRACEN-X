@@ -1,16 +1,7 @@
 import json
 
-TERMINATOR_FLAG = False
 CAN_WAIT_TIME = 200 # seconds
 NULL_CNT = 500000 # Number of null characters to wait before stopping the serial read
-
-def signal_handler(sig, frame):
-    """
-    Signal handler for the SIGINT signal.
-    """
-    global TERMINATOR_FLAG
-    print('\nTerminating...');
-    TERMINATOR_FLAG = True
 
 
 def setup_file(filename: str):

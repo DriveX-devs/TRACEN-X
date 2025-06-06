@@ -6,17 +6,17 @@ if __name__ == '__main__':
     The timestamps of the traces are aligned to the first timestamp of the reference file.
 
     Comand line arguments:
-    --csv_files: List of CSV file names to merge
+    --csv-files: List of CSV file names to merge
     --output: Output CSV file name
-    --file_reference: Reference CSV file name to align the timestamps
+    --file-reference: Reference CSV file name to align the timestamps
 
     Example:
-    python union.py --csv_files trace1.csv trace2.csv trace3.csv --output merged.csv --file_reference trace1.csv
+    python merge_traces/union.py --csv-files trace1.csv trace2.csv trace3.csv --output merged.csv --file-reference trace1.csv
     """
     args = argparse.ArgumentParser()
-    args.add_argument("--csv_files", nargs='+', help="List of CSV file names to merge", required=True)
+    args.add_argument("--csv-files", nargs='+', help="List of CSV file names to merge", required=True)
     args.add_argument("--output", "-o", type=str, help="Output CSV file name", required=True)
-    args.add_argument("--file_reference", "-r", type=str, help="Reference CSV file name to align the timestamps", required=True)
+    args.add_argument("--file-reference", "-r", type=str, help="Reference CSV file name to align the timestamps", required=True)
     args = args.parse_args()
 
     print('Union of traces')

@@ -3,12 +3,14 @@ import json
 import math
 import time
 from decoded_messages import DecodedMessage
+from typing import Any
 
-def csv_conversion(input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
+def csv_conversion(stop_event: Any, input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
     """
     CSV function to store in a csv file the kinematic of the agent over the capture.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - input_filename (str): Path to the input log file (e.g., GNSS or sensor data in JSON).
     - csv_filename (str): Path to the output CSV file to store the converted data.
     - csv_interpolation (bool): Whether to interpolate missing or irregular timestamp entries in the dataset.
@@ -125,7 +127,7 @@ def csv_conversion(input_filename: str, csv_filename: str, csv_interpolation: bo
             df["accel_ms2"].append(acc)
             i += 1
 
-        if end_time and time.time() * 1e6 - start_time > end_time:
+        if (end_time and time.time() * 1e6 - start_time > end_time) or stop_event.is_set():
             break
 
     try:

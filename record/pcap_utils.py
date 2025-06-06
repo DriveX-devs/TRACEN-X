@@ -1,20 +1,19 @@
 from scapy.all import sniff, wrpcap
-import utils
+from typing import Any
 
-MAX_SIZE_PKT_LIST = 400 # Reduce the I/O consecutive disk operations
-
-def sniff_pkt(pcap_filename: str, interface: str):
+def sniff_pkt(stop_event: Any, pcap_filename: str, interface: str):
     """
     Reads data from a network interface and writes the packets into a .pcap file.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - pcap_filename (str): The file to write to.
     - interface (str): The network interface to read from.
     - end_time (int): The time to stop reading in seconds.
     - real_time (bool): Enable real-time serial emulation.
     """
     try:
-        capture = sniff(iface=interface, stop_filter=lambda x: utils.TERMINATOR_FLAG)
+        capture = sniff(iface=interface, stop_filter=lambda x: stop_event.is_set())
         print("Number of packets sniffed: ", len(capture))
         wrpcap(pcap_filename, capture)
     except Exception as e:

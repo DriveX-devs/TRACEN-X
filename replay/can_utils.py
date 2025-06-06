@@ -3,12 +3,14 @@ import can
 import cantools
 import time
 import json
+from typing import Any
 
-def write_CAN(device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
+def write_CAN(stop_event: Any, device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the CAN device.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - device (str): The name of the CAN device/interface to send messages to (e.g., "vcan0" or "can0").
     - input_filename (str): Path to the CAN log file (e.g., JSON or ASC format) containing messages to be replayed.
     - db_file (str): Path to the DBC file used for encoding/decoding CAN messages.
@@ -60,7 +62,7 @@ def write_CAN(device: str, input_filename: str, db_file: str, start_time: int, e
                     first_send = time.time()
                 bus.send(final_message)
             previous_time = d["timestamp"]
-            if end_time and time.time() * 1e6 - startup_time > end_time:
+            if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
                 break
     except Exception as e:
         print(f"Error: {e}")

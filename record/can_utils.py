@@ -4,12 +4,14 @@ import cantools
 import time
 import traceback
 from collections import deque
+from typing import Any
 
-def read_CAN_bus(CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
+def read_CAN_bus(stop_event: Any, CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
     """
     Reads the CAN bus and writes the messages to a file.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - CAN_device (str): The CAN device to read from.
     - CAN_filename (str): The file to write to.
     - CAN_db (str): The CAN database file.
@@ -57,7 +59,7 @@ def read_CAN_bus(CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_s
                     print("Expired waiting time for CAN bus messages")
                     break
                 t = time.time()
-                if (end_time is not None and t > end_time) or utils.TERMINATOR_FLAG:
+                if (end_time is not None and t > end_time) or stop_event.is_set():
                     break
         else:
             # Read the log file
@@ -80,7 +82,7 @@ def read_CAN_bus(CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_s
                     }
                     can_messages.append(object)
                     t = time.time()
-                    if (end_time is not None and t > end_time) or utils.TERMINATOR_FLAG:
+                    if (end_time is not None and t > end_time) or stop_event.is_set():
                         break
 
     except Exception as e:

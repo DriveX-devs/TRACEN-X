@@ -6,7 +6,6 @@ sys.path.insert(1, './serial_emulator')
 from serial_emulator import SerialEmulator
 
 CLUSTER_TSHOLD_MS = 20 # In [ms]
-MAP_OPENED = False
 BUMPER_TO_SENSOR_DISTANCE = 1.54  # In [m]
 STANDARD_OBJECT_LENGTH = 4.24  # [m]
 STANDARD_OBJECT_WIDTH = 1.81  # [m]

@@ -1,6 +1,7 @@
 import argparse
-import threading
+from multiprocessing import Process, Event
 import os
+import signal
 from visualizer import Visualizer
 from csv_conversion_utils import csv_conversion
 from test_rate_utils import test_rate
@@ -9,12 +10,19 @@ from gui_utils import serial_gui
 from serial_utils import write_serial
 from pcap_utils import write_pcap
 
+def signal_handler(sig, frame, stop_event):
+    """
+    Signal handler for the SIGINT signal.
+    """
+    print("\nTerminating...")
+    stop_event.set()
+
 def main():
     """
     Entry point for the data replay and emulation framework.
 
     This script supports multiple replay modes including serial, CAN, CSV export, PCAP playback, and graphical visualization through a web-based GUI.
-    It initializes the selected emulation threads based on user-specified command-line arguments, ensuring synchronized and modular replay of recorded datasets for debugging, validation, or visualization purposes.
+    It initializes the selected emulation processes based on user-specified command-line arguments, ensuring synchronized and modular replay of recorded datasets for debugging, validation, or visualization purposes.
 
     Command-line Arguments:
     - --enable-serial (bool): Whether to enable the serial emulator. Default is False. Can be activated by writing it.
@@ -42,7 +50,7 @@ def main():
     - --update-datetime (bool): If the emulation of pcap trace must update the packets datetime to the current one. Default is False.
 
     Example:
-    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime
+    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng
     """
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial emulator")
@@ -69,6 +77,7 @@ def main():
     args.add_argument("--interface", type=str, help="The network interface to which write the pcap content", default="wlan0")
     args.add_argument("--pcap-filename", type=str, help="The pcap file to read the packets for the emulation", default="./data/pcap_output/trace.pcapng")
     args.add_argument("--update-datetime", action="store_true", help="If the emulation of pcap trace must update the packets datetime to the current one. Default is False", default=False)
+    args.add_argument("--new-pcap-file", type=str, help="The new pcap file (if needed) with packets with updated datetime", default="")
 
     args = args.parse_args()
     serial = args.enable_serial
@@ -102,6 +111,7 @@ def main():
     interface = args.interface
     pcap_filename = args.pcap_filename
     update_datetime = args.update_datetime
+    new_pcap = args.new_pcap_file
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
@@ -110,20 +120,22 @@ def main():
 
     visualizer = None
     fifo_path = None
-    serial_thread = None
-    can_thread = None
-    test_rate_thread = None
-    csv_thread = None
-    gui_thread = None
-    pcap_thread = None
+    serial_process = None
+    can_process = None
+    test_rate_process = None
+    csv_process = None
+    gui_process = None
+    pcap_process = None
+
+    stop_event = Event()
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
-        serial_thread = threading.Thread(
-            target=write_serial, args=(server_device, client_device, baudrate, serial_filename, start_time, end_time)
+        serial_process = Process(
+            target=write_serial, args=(stop_event, server_device, client_device, baudrate, serial_filename, start_time, end_time)
         )
-        serial_thread.daemon = True
-        serial_thread.start()
+        serial_process.start()
 
     if enable_CAN_gui:
         assert enable_serial_gui, "The serial GUI must be activated to display the CAN GUI"
@@ -140,32 +152,25 @@ def main():
             os.mkfifo(fifo_path)
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
         if enable_CAN_gui:
-            gui_thread = threading.Thread(
-                target=serial_gui, args=(serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
+            gui_process = Process(
+                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
             )
         else:
-            gui_thread = threading.Thread(
-                target=serial_gui, args=(serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
+            gui_process = Process(
+                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
             )
-        gui_thread.daemon = True
-        gui_thread.start()
+        gui_process.start()
     
     if CAN:
         assert os.path.exists(CAN_filename), "The file does not exist"
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
-        can_thread = threading.Thread(
-            target=write_CAN, args=(CAN_device, CAN_filename, CAN_db, start_time, end_time)
-        )
-        can_thread.daemon = True
-        can_thread.start()
+        can_process = Process(target=write_CAN, args=(stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
+        can_process.start()
 
     if test_rate_enabled:
         assert os.path.exists(serial_filename), "The file does not exist"
-        test_rate_thread = threading.Thread(
-            target=test_rate, args=(serial_filename, start_time, end_time)
-        )
-        test_rate_thread.daemon = True
-        test_rate_thread.start()
+        test_rate_process = Process(target=test_rate, args=(stop_event, serial_filename, start_time, end_time))
+        test_rate_process.start()
     
     if csv:
         assert os.path.exists(serial_filename), "The file does not exist"
@@ -174,36 +179,45 @@ def main():
         assert agent_type in ["car", "vru"], "The agent type must be either car or vru"
         agent_id = input("Insert the agent id: ")
         assert agent_id, "The agent id must be inserted"
-        csv_thread = threading.Thread(
-            target=csv_conversion, args=(serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
+        csv_process = Process(
+            target=csv_conversion, args=(stop_event, serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
         )
-        csv_thread.daemon = True
-        csv_thread.start()
+        csv_process.start()
 
     if enable_pcap:
         assert os.path.exists(pcap_filename)
-        pcap_thread = threading.Thread(target=write_pcap, args=(pcap_filename, interface, start_time, end_time, update_datetime))
-        pcap_thread.daemon = True
-        pcap_thread.start()
+        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap))
+        pcap_process.start()
 
-    if serial:
-        serial_thread.join()
+    try:
+        if serial:
+            serial_process.join()
 
-    if enable_serial_gui:
-        gui_thread.join()
+        if enable_serial_gui:
+            gui_process.join()
 
-    if CAN:
-        can_thread.join()
-    
-    if test_rate_enabled:
-        test_rate_thread.join()
-    
-    if csv:
-        csv_thread.join()
+        if CAN:
+            can_process.join()
+        
+        if test_rate_enabled:
+            test_rate_process.join()
+        
+        if csv:
+            csv_process.join()
 
-    if enable_pcap:
-        pcap_thread.join()
-    
+        if enable_pcap:
+            pcap_process.join()
+
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+        stop_event.set()
+        if serial_process: serial_process.join()
+        if enable_serial_gui: gui_process.join()
+        if CAN: can_process.join()
+        if test_rate_enabled: test_rate_process.join()
+        if csv: csv_process.join()
+        if pcap_process: pcap_process.join()
+        
 
 if __name__ == "__main__":
     main()

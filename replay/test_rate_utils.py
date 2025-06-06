@@ -1,6 +1,7 @@
 import utils
 import time
 import json
+from typing import Any
 from decoded_messages import DecodedMessage
 
 UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT, UBX_NAV_STATUS_PRESENT = False, False, False, False, False
@@ -36,11 +37,12 @@ def print_test_rate_stats(average_update_time: float, average_update_time_filter
     print("UBX-NAV-STATUS present:", UBX_NAV_STATUS_PRESENT)
 
 
-def test_rate(filename: str, start_time: int, end_time: int):
+def test_rate(stop_event: Any, filename: str, start_time: int, end_time: int):
     """
     Test rate function that calculates the update rate of the GNSS messages.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - filename (str): Path to the file containing GNSS log data (e.g., JSON format with timestamps).
     - start_time (int): Start time in microseconds; messages with timestamps before this will be ignored.
     - end_time (int): End time in microseconds; messages with timestamps after this will be ignored.
@@ -188,7 +190,7 @@ def test_rate(filename: str, start_time: int, end_time: int):
             update_msg_speed.append(-1000)
 
         previous_time = d["timestamp"]
-        if end_time and time.time() * 1e6 - startup_time > end_time:
+        if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
             break
     try:
         print_test_rate_stats(average_update_time, average_update_time_filtered)

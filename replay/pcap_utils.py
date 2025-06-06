@@ -1,8 +1,6 @@
-from scapy.layers.l2 import Ether
-from scapy.layers.inet import IP
 import socket
-import utils
 import time
+from typing import Any
 import asn1tools as asn
 from scapy.all import *
 
@@ -69,15 +67,17 @@ def get_timestamp_ms(purpose: str) -> int:
     return -1
 
 
-def write_pcap(input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool):
+def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str):
     """
     Sends packets from a pcap file to a network interface within a given time window.
 
     Parameters:
+    - stop_event (multiprocessing.Event): The Event object to stop the processes.
     - input_filename (str): Path to the pcap file.
     - interface (str): Network interface to send packets through.
     - start_time (int): Start time in microseconds.
     - end_time (int): End time in microseconds.
+    - new_pcap (str): New pcap file to write the reproduced packets
     """
     pcap = rdpcap(input_filename)
     assert pcap, "Pcap file is empty"
@@ -94,111 +94,130 @@ def write_pcap(input_filename: str, interface: str, start_time: int, end_time: i
 
     base_ts = pcap[0].time  # epoch time in seconds
     startup_time = time.time() * 1e6
-    for i, pkt in enumerate(pcap):
-        pkt_ts_us = int(1e6 * (pkt.time - base_ts))
+    packets = list()
+    try:
+        for i, pkt in enumerate(pcap):
+            pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
-        if start_time is not None and pkt_ts_us < start_time:
-            continue
-        if end_time is not None and pkt_ts_us > end_time:
-            break
+            if stop_event.is_set():
+                break
 
-        if update_datetime:
-            raw_part = None
-            try:
-                ether_part = raw(pkt)[:ETHER_LENGTH]
-                data = raw(pkt)[ETHER_LENGTH:]
-                geonet = data[:GEONET_LENGTH]
-                current_timestamp = get_timestamp_ms(purpose="GeoNet")
-                assert current_timestamp > 0, "Error in time calculation"
-                current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
-                new_geonet = geonet[:GEONET_TS_LOW] + current_timestamp + geonet[GEONET_TS_HIGH:]
-
-                btp = data[BTP_LOW : BTP_HIGH]
-                port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
-                mex_encoded = None
-                if port == 2009:
-                    # CPM
-                    cpm_bytes = data[BTP_HIGH:]
-                    cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
-                    old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
-                    new_reference_time = get_timestamp_ms(purpose="CPM")
-                    assert new_reference_time > 0, "Error in time calculation"
-                    cpm["payload"]["managementContainer"]["referenceTime"] = new_reference_time
-
-                    if "InterferenceManagementZones" in cpm["payload"]:
-                        zones = cpm["payload"]["InterferenceManagementZones"]
-                        for zone in zones:
-                            if "managementInfo" in zone:
-                                for info in zone["managementInfo"]:
-                                    if "expiryTime" in info:
-                                        old_expiry_time = info["expiryTime"]
-                                        delta = old_expiry_time - old_reference_time
-                                        info["expiryTime"] = new_reference_time + delta
-                    
-                    if "ProtectedCommunicationZonesRSU" in cpm["payload"]:
-                        zones = cpm["payload"]["ProtectedCommunicationZonesRSU"]
-                        for zone in zones:
-                            if "expiryTime" in zone:
-                                old_expiry_time = zone["expiryTime"]
-                                delta = old_expiry_time - old_reference_time
-                                zone["expiryTime"] = new_reference_time + delta
-                    
-                    mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
-                elif port == 2001:
-                    # CAM
-                    continue
-                elif port == 2018:
-                    # VAM
-                    vam_bytes = data[BTP_HIGH:]
-                    vam = VAM.decode("VAM", vam_bytes)
-                    old_reference_time = vam["vam"]["generationDeltaTime"]
-                    new_reference_time = get_timestamp_ms(purpose="VAM")
-                    assert new_reference_time > 0, "Error in time calculation"
-                    vam["vam"]["generationDeltaTime"] = new_reference_time
-
-                    if "InterferenceManagementZones" in vam["vam"]:
-                        zones = vam["vam"]["InterferenceManagementZones"]
-                        for zone in zones:
-                            if "managementInfo" in zone:
-                                management_info_list = zone["managementInfo"]
-                                for info in management_info_list:
-                                    if "expiryTime" in info:
-                                        old_expiry = info["expiryTime"]
-                                        delta = old_expiry - old_reference_time
-                                        info["expiryTime"] = new_reference_time + delta
-
-                    mex_encoded = VAM.encode("VAM", vam)
-
-                assert mex_encoded is not None, "Something went wrong in the message modifications"
-
-                raw_part = new_geonet + btp + mex_encoded
-
-                if ether_part and raw_part:
-                    pkt = ether_part + raw_part
-
-            except Exception as e:
-                # Malformed packet
+            if start_time is not None and pkt_ts_us < start_time:
                 continue
-        else:
-            pkt = raw(pkt)
-                
+            if end_time is not None and pkt_ts_us > end_time:
+                break
 
-        delta_time_us_real = time.time() * 1e6 - startup_time
-        delta_time_us_simulation = pkt_ts_us - start_time_us
-        variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-        if variable_delta_us_factor > 0:
-            # Wait for the real time to be as close as possible to the simulation time
-            # print("Sleeping for:", variable_delta_us_factor / 1e6)
-            time.sleep(variable_delta_us_factor / 1e6)
-        else:
-            # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-            pass
-        try:
-            sock.send(pkt)
-        except Exception as e:
-            print(f"Error: {e}")
+            if update_datetime:
+                raw_part = None
+                try:
+                    ether_part = raw(pkt)[:ETHER_LENGTH]
+                    data = raw(pkt)[ETHER_LENGTH:]
+                    geonet = data[:GEONET_LENGTH]
+                    current_timestamp = get_timestamp_ms(purpose="GeoNet")
+                    assert current_timestamp > 0, "Error in time calculation"
+                    current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
+                    new_geonet = geonet[:GEONET_TS_LOW] + current_timestamp + geonet[GEONET_TS_HIGH:]
+
+                    btp = data[BTP_LOW : BTP_HIGH]
+                    port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
+                    mex_encoded = None
+                    if port == 2009:
+                        # CPM
+                        cpm_bytes = data[BTP_HIGH:]
+                        cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
+                        old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
+                        new_reference_time = get_timestamp_ms(purpose="CPM")
+                        assert new_reference_time > 0, "Error in time calculation"
+                        cpm["payload"]["managementContainer"]["referenceTime"] = new_reference_time
+
+                        # TODO to test
+                        if "InterferenceManagementZones" in cpm["payload"]:
+                            zones = cpm["payload"]["InterferenceManagementZones"]
+                            for zone in zones:
+                                if "managementInfo" in zone:
+                                    for info in zone["managementInfo"]:
+                                        if "expiryTime" in info:
+                                            old_expiry_time = info["expiryTime"]
+                                            delta = old_expiry_time - old_reference_time
+                                            info["expiryTime"] = new_reference_time + delta
+                        
+                        # TODO to test
+                        if "ProtectedCommunicationZonesRSU" in cpm["payload"]:
+                            zones = cpm["payload"]["ProtectedCommunicationZonesRSU"]
+                            for zone in zones:
+                                if "expiryTime" in zone:
+                                    old_expiry_time = zone["expiryTime"]
+                                    delta = old_expiry_time - old_reference_time
+                                    zone["expiryTime"] = new_reference_time + delta
+                        
+                        mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
+                    elif port == 2001:
+                        # CAM
+                        # TODO
+                        continue
+                    elif port == 2018:
+                        # VAM
+                        vam_bytes = data[BTP_HIGH:]
+                        vam = VAM.decode("VAM", vam_bytes)
+                        old_reference_time = vam["vam"]["generationDeltaTime"]
+                        new_reference_time = get_timestamp_ms(purpose="VAM")
+                        assert new_reference_time > 0, "Error in time calculation"
+                        vam["vam"]["generationDeltaTime"] = new_reference_time
+
+                        # TODO to test
+                        if "InterferenceManagementZones" in vam["vam"]:
+                            zones = vam["vam"]["InterferenceManagementZones"]
+                            for zone in zones:
+                                if "managementInfo" in zone:
+                                    management_info_list = zone["managementInfo"]
+                                    for info in management_info_list:
+                                        if "expiryTime" in info:
+                                            old_expiry = info["expiryTime"]
+                                            delta = old_expiry - old_reference_time
+                                            info["expiryTime"] = new_reference_time + delta
+
+                        mex_encoded = VAM.encode("VAM", vam)
+
+                    assert mex_encoded is not None, "Something went wrong in the message modifications"
+
+                    raw_part = new_geonet + btp + mex_encoded
+
+                    if ether_part and raw_part:
+                        pkt = ether_part + raw_part
+                    
+                    if new_pcap != "":
+                        packets.append(pkt)
+
+                except Exception as e:
+                    # Malformed packet
+                    continue
+            else:
+                pkt = raw(pkt)
+                    
+            delta_time_us_real = time.time() * 1e6 - startup_time
+            delta_time_us_simulation = pkt_ts_us - start_time_us
+            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+            if variable_delta_us_factor > 0:
+                # Wait for the real time to be as close as possible to the simulation time
+                # print("Sleeping for:", variable_delta_us_factor / 1e6)
+                time.sleep(variable_delta_us_factor / 1e6)
+            else:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                pass
+            try:
+                sock.send(pkt)
+            except Exception as e:
+                print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")
+    
+    finally:
+        if new_pcap != "" and len(packets) > 0:
+            wrpcap(new_pcap, packets)
+
+        print(f"Pcap reproduction on interface {interface} terminated")
 
 
-write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
+# write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-#write_pcap(input_filename="/home/diego/TRACEN-X/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
+# write_pcap(input_filename="/home/diego/TRACEN-X/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
