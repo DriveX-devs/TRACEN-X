@@ -41,6 +41,7 @@ def main():
     Example:
     python3 record/record.py --enable-serial --device=/dev/ttyACM0 --serial-filename=./data/outlog.json --baudrate=115200 --end-time=10 --enable-CAN --CAN-device=vcan0 --CAN-filename=./data/CANlog.json --CAN-db=./data/motohawk.db --enable-pcap --interface=wlan1 --pcap-filename=./data/pcap_output/trace2.pcapng
     """
+
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial logging")
     args.add_argument("--serial-device", type=str, help="The device to read from", default="/dev/ttyACM0")
