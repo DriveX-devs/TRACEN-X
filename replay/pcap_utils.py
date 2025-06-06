@@ -27,6 +27,13 @@ CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
 
+def check_none_fields(d, path=""):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            check_none_fields(v, f"{path}.{k}" if path else k)
+    elif d is None:
+        print(f"❌ Found None at: {path}")
+
 def get_timestamp_ms(purpose: str) -> int:
 
     if purpose == "CPM" or purpose == "GeoNet":
@@ -161,6 +168,30 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         new_reference_time = get_timestamp_ms(purpose="CAM")
                         assert new_reference_time > 0, "Error in time calculation"
                         cam["cam"]["generationDeltaTime"] = new_reference_time
+                        if not cam["cam"]["camParameters"]["highFrequencyContainer"][1]["curvatureCalculationMode"]:
+                            cam["cam"]["camParameters"]["highFrequencyContainer"][1]["curvatureCalculationMode"] = "unavailable"
+
+                        # TODO to test
+                        if "InterferenceManagementZones" in cam["cam"]:
+                            zones = cam["cam"]["InterferenceManagementZones"]
+                            for zone in zones:
+                                if "managementInfo" in zone:
+                                    management_info_list = zone["managementInfo"]
+                                    for info in management_info_list:
+                                        if "expiryTime" in info:
+                                            old_expiry = info["expiryTime"]
+                                            delta = old_expiry - old_reference_time
+                                            info["expiryTime"] = new_reference_time + delta
+                        
+                        # TODO to test
+                        if "ProtectedCommunicationZonesRSU" in cam["cam"]:
+                            zones = cam["cam"]["ProtectedCommunicationZonesRSU"]
+                            for zone in zones:
+                                if "expiryTime" in zone:
+                                    old_expiry_time = zone["expiryTime"]
+                                    delta = old_expiry_time - old_reference_time
+                                    zone["expiryTime"] = new_reference_time + delta
+                        
                         mex_encoded = CAM.encode("CAM", cam)
                     elif port == 2018:
                         # VAM
@@ -227,4 +258,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-write_pcap(stop_event=None, input_filename="/Users/diego/Downloads/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")
+write_pcap(stop_event=None, input_filename="/home/diego/TRACEN-X/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")
