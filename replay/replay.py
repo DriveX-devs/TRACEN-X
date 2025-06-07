@@ -78,6 +78,7 @@ def main():
     args.add_argument("--pcap-filename", type=str, help="The pcap file to read the packets for the emulation", default="./data/pcap_output/trace.pcapng")
     args.add_argument("--update-datetime", action="store_true", help="If the emulation of pcap trace must update the packets datetime to the current one. Default is False", default=False)
     args.add_argument("--new-pcap-file", type=str, help="The new pcap file (if needed) with packets with updated datetime", default="")
+    args.add_argument("--enable-pcap-gui", action="store_true", help="Whether to display the pcap GUI. Default is False", default=False)
 
     args = args.parse_args()
     serial = args.enable_serial
@@ -112,6 +113,7 @@ def main():
     pcap_filename = args.pcap_filename
     update_datetime = args.update_datetime
     new_pcap = args.new_pcap_file
+    enable_pcap_gui = args.enable_pcap_gui
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
@@ -151,14 +153,23 @@ def main():
         if not os.path.exists(fifo_path):
             os.mkfifo(fifo_path)
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
-        if enable_CAN_gui:
+        if enable_CAN_gui and not enable_pcap_gui:
             gui_process = Process(
                 target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
+            )
+        elif enable_CAN_gui and enable_pcap_gui:
+            gui_process = Process(
+                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db, pcap_filename)
+            )
+        elif enable_pcap_gui:
+            gui_process = Process(
+                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, None, None, pcap_filename)
             )
         else:
             gui_process = Process(
                 target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
             )
+
         gui_process.start()
     
     if CAN:

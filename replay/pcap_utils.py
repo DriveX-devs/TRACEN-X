@@ -27,13 +27,6 @@ CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
 
-def check_none_fields(d, path=""):
-    if isinstance(d, dict):
-        for k, v in d.items():
-            check_none_fields(v, f"{path}.{k}" if path else k)
-    elif d is None:
-        print(f"❌ Found None at: {path}")
-
 def get_timestamp_ms(purpose: str) -> int:
 
     if purpose == "CPM" or purpose == "GeoNet":
@@ -258,4 +251,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-write_pcap(stop_event=None, input_filename="/home/diego/TRACEN-X/track_2_50kmh_refTimeFix 1.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")
+# write_pcap(stop_event=None, input_filename="/Users/diego/Desktop/PhD/TRACEN-X/track_2_50kmh_refTimeFix.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")

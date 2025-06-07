@@ -7,11 +7,24 @@ import pyproj
 import threading
 from decoded_messages import DecodedMessage
 from visualizer import Visualizer
+from scapy.all import *
+import asn1tools as asn
 from typing import Any
 
 MAP_OPENED = False
+BTP_LOW = 40
+BTP_HIGH = 44
+BTP_PORT_HIGH = 2
+ETHER_LENGTH = 14
 
-def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
+cpm_asn = "./data/asn/CPM-all.asn"
+vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
+cam_asn = "./data/asn/CAM-all.asn"
+CPM = asn.compile_files(cpm_asn, "uper")
+VAM = asn.compile_files(vam_asn, "uper")
+CAM = asn.compile_files(cam_asn, "uper")
+
+def manage_map(GNSS_flag: bool, CAN_flag: bool, pcap_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
     global MAP_OPENED
     try:
         if not MAP_OPENED:
@@ -29,10 +42,91 @@ def manage_map(GNSS_flag: bool, CAN_flag: bool, fifo_path: str, latitude: float,
         raise e
     try:
         # Send the new object position to the server that will update the map GUI
-        visualizer.send_object_udp_message(GNSS_flag, CAN_flag, latitude, longitude, heading, server_ip, server_port, station_id, type)
+        visualizer.send_object_udp_message(GNSS_flag, CAN_flag, pcap_flag, latitude, longitude, heading, server_ip, server_port, station_id, type)
     except Exception as e:
         print(f"Error sending UDP message: {e}")
         raise e
+
+
+def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str, visualizer: Visualizer):
+    pcap = rdpcap(pcap_filename)
+    assert pcap, "Pcap file is empty"
+
+    # start_time_us represents the time in microseconds from the beginning of the messages simulation to the start time selected by the user
+    start_time_us = start_time if start_time else 0
+
+    base_ts = pcap[0].time  # epoch time in seconds
+    startup_time = time.time() * 1e6
+    packets = list()
+    try:
+        for i, pkt in enumerate(pcap):
+            try:
+                pkt_ts_us = int(1e6 * (pkt.time - base_ts))
+
+                if start_time is not None and pkt_ts_us < start_time:
+                    continue
+                if end_time is not None and pkt_ts_us > end_time:
+                    break
+                data = raw(pkt)[ETHER_LENGTH:]
+                btp = data[BTP_LOW: BTP_HIGH]
+                port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
+                mex_encoded = None
+                if port == 2009:
+                    # CPM
+                    cpm_bytes = data[BTP_HIGH:]
+                    cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
+                    station_id = cpm["header"]["stationId"]
+                    lat = cpm["payload"]["managementContainer"]["referencePosition"]["latitude"]
+                    lon = cpm["payload"]["managementContainer"]["referencePosition"]["longitude"]
+                    while not MAP_OPENED:
+                        startup_time = time.time() * 1e6
+                    manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat,
+                               longitude=lon,
+                               heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
+                               station_id=station_id, type=5)
+
+                elif port == 2001:
+                    # CAM
+                    cam_bytes = data[BTP_HIGH:]
+                    cam = CAM.decode("CAM", cam_bytes)
+                    station_id = cam["header"]["stationID"]
+                    print(cam)
+                    lat = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["latitude"]
+                    lon = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["longitude"]
+                    while not MAP_OPENED:
+                        startup_time = time.time() * 1e6
+                    manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat, longitude=lon,
+                                   heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
+                                   station_id=station_id, type=0)
+
+                elif port == 2018:
+                    # VAM
+                    vam_bytes = data[BTP_HIGH:]
+                    vam = VAM.decode("VAM", vam_bytes)
+                    # manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat1,
+                    #           longitude=lon1,
+                    #           heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
+                    #           station_id=arbitration_id, type=1)
+
+                delta_time_us_real = time.time() * 1e6 - startup_time
+                delta_time_us_simulation = pkt_ts_us - start_time_us
+                variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+                if variable_delta_us_factor > 0:
+                    # Wait for the real time to be as close as possible to the simulation time
+                    # print("Sleeping for:", variable_delta_us_factor / 1e6)
+                    time.sleep(variable_delta_us_factor / 1e6)
+                else:
+                    # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                    pass
+            except Exception as e:
+                # Malformed packet
+                continue
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if visualizer:
+            visualizer.stop_server(server_ip, server_port)
+
 
 def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, server_ip: str, server_port: int,
             fifo_path: str, visualizer: Visualizer):
@@ -111,7 +205,9 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
                         ego_y += yDistance
                         # Reverse transformation: convert projected (x, y) back to geographic coordinates (lat, lon)
                         lon1, lat1 = proj_tmerc(ego_x, ego_y, inverse=True)
-                        manage_map(GNSS_flag=False, CAN_flag=True, fifo_path=fifo_path, latitude=lat1, longitude=lon1,
+                        while not MAP_OPENED:
+                            startup_time = time.time() * 1e6
+                        manage_map(GNSS_flag=False, CAN_flag=True, pcap_flag=False, fifo_path=fifo_path, latitude=lat1, longitude=lon1,
                                    heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
                                    station_id=arbitration_id, type=5)
                     pass
@@ -139,7 +235,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
 
 
 def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
-               visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None):
+               visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None, pcap_filename: str = None):
     """
     GUI function to display the data on the map.
 
@@ -154,6 +250,7 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
     - visualizer (Visualizer): Visualizer object responsible for rendering the data on the GUI/map.
     - CAN_filename (str, optional): Path to the CAN log file (if CAN data should be included). Default is None.
     - CAN_db (str, optional): Path to the DBC file used to decode CAN messages. Required if CAN_filename is provided. Default is None.
+    - pcap_filename (str, optional): Path to the pcap file. Default is None
     """
 
     try:
@@ -180,6 +277,14 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
             can_thread = threading.Thread(
                 target=CAN_gui, args=(CAN_filename, CAN_db, start_time, end_time, server_ip, server_port, fifo_path, visualizer), daemon=True)
             can_thread.start()
+
+        pcap_thread = None
+        if pcap_filename:
+            pcap_thread = threading.Thread(
+                target=pcap_gui,
+                args=(pcap_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer),
+                daemon=True)
+            pcap_thread.start()
 
         for d in data:
             delta_time = d["timestamp"] - previous_time
@@ -218,7 +323,7 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
                 first_send = time.time()
             previous_time = d["timestamp"]
             if latitude and longitude:
-                manage_map(GNSS_flag=True, CAN_flag=False, fifo_path=fifo_path, latitude=latitude, longitude=longitude,
+                manage_map(GNSS_flag=True, CAN_flag=False, pcap_flag=False, fifo_path=fifo_path, latitude=latitude, longitude=longitude,
                            heading=heading, server_ip=server_ip, server_port=server_port, visualizer=visualizer)
             if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
                 break
@@ -230,3 +335,5 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
             visualizer.stop_server(server_ip, server_port)
         if can_thread:
             can_thread.join()
+        if pcap_thread:
+            pcap_thread.join()

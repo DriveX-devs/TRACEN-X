@@ -30,11 +30,11 @@ class Visualizer:
             print(f"Error starting nodejs server: {e}")
             raise e
 
-    def send_object_udp_message(self, GNSS_flag: bool, CAN_flag: bool, lat: float, lon: float, heading: float, server_ip: str, server_port: int, station_id: int = 1, type: int = 5):
+    def send_object_udp_message(self, GNSS_flag: bool, CAN_flag: bool, pcap_flag: bool, lat: float, lon: float, heading: float, server_ip: str, server_port: int, station_id: int = 1, type: int = 5):
         """
         Sends a UDP message with the latitude, longitude, and heading to the specified server.
         """
-        assert GNSS_flag or CAN_flag, "At least one of GNSS_flag or CAN"
+        assert GNSS_flag or CAN_flag or pcap_flag, "At least one of GNSS_flag or CAN"
         
         if not heading:
             heading = 361
