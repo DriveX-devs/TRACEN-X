@@ -33,7 +33,7 @@ PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
 
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
-cam_asn = "./data/asn/CAM-all.asn"
+cam_asn = "./data/asn/CAM-all2.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
@@ -111,6 +111,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     packets = list()
     try:
         for i, pkt in enumerate(pcap):
+            print(i)
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
             if stop_event and stop_event.is_set():
@@ -296,7 +297,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                 new_pkt = raw(pkt)
 
             if new_pcap != "":
-                print("Appending")
                 packets.append(new_pkt)
                     
             delta_time_us_real = time.time() * 1e6 - startup_time
@@ -327,4 +327,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-write_pcap(stop_event=None, input_filename="/mnt/xtra/TRACEN-X/cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="new_pcap.pcap")
+write_pcap(stop_event=None, input_filename="/mnt/xtra/TRACEN-X/cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap")
