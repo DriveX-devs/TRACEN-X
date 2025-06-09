@@ -134,10 +134,17 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
                     # VAM
                     vam_bytes = data[BTP_HIGH:]
                     vam = VAM.decode("VAM", vam_bytes)
-                    # manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat1,
-                    #           longitude=lon1,
-                    #           heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
-                    #           station_id=arbitration_id, type=1)
+                    station_id = vam["header"]["stationId"]
+                    lat = vam["vam"]["vamParameters"]["basicContainer"]["referencePosition"]["latitude"] / CONVERSION_CONSTANT
+                    lon = vam["vam"]["vamParameters"]["basicContainer"]["referencePosition"]["longitude"] / CONVERSION_CONSTANT
+                    heading = vam["vam"]["vamParameters"]["vruHighFrequencyContainer"]["heading"]["value"] / 10
+                    manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat,
+                               longitude=lon, heading=heading, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
+                               station_id=station_id, type=1)
+
+                elif port == 2002:
+                    # TODO DENM
+                    pass
 
                 delta_time_us_real = time.time() * 1e6 - startup_time
                 delta_time_us_simulation = pkt_ts_us - start_time_us

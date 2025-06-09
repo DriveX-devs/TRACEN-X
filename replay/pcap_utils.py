@@ -11,6 +11,7 @@ GEONET_TS_HIGH = 24
 BTP_LOW = 40
 BTP_HIGH = 44
 BTP_PORT_HIGH = 2
+SECURITY_PAD = 7
 
 
 TIME_SHIFT = 1072915200000
@@ -20,9 +21,9 @@ MODULO_CAM_VAM = 65536
 
 PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
 
-cpm_asn = "./data/asn/CPM-all.asn"
-vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
-cam_asn = "./data/asn/CAM-all.asn"
+cpm_asn = "../data/asn/CPM-all.asn"
+vam_asn = "../data/asn/VAM-PDU-FullDescription.asn"
+cam_asn = "../data/asn/CAM-all.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
@@ -114,18 +115,24 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                 try:
                     ether_part = raw(pkt)[:ETHER_LENGTH]
                     data = raw(pkt)[ETHER_LENGTH:]
-                    geonet = data[:GEONET_LENGTH]
+                    security = False if data[:1] == b'\x11' else True
+                    geonet_lenght = GEONET_LENGTH if security == False else GEONET_LENGTH + SECURITY_PAD
+                    geonet = data[:geonet_lenght]
                     current_timestamp = get_timestamp_ms(purpose="GeoNet")
                     assert current_timestamp > 0, "Error in time calculation"
                     current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
-                    new_geonet = geonet[:GEONET_TS_LOW] + current_timestamp + geonet[GEONET_TS_HIGH:]
+                    geonet_ts_low = GEONET_TS_LOW if security == False else GEONET_TS_LOW + SECURITY_PAD
+                    geonet_ts_high = GEONET_TS_HIGH if security == False else GEONET_TS_HIGH + SECURITY_PAD
+                    new_geonet = geonet[:geonet_ts_low] + current_timestamp + geonet[geonet_ts_high:]
 
-                    btp = data[BTP_LOW : BTP_HIGH]
+                    btp_low = BTP_LOW if security == False else BTP_LOW + SECURITY_PAD
+                    btp_high = BTP_HIGH if security == False else BTP_HIGH + SECURITY_PAD
+                    btp = data[btp_low : btp_high]
                     port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
                     mex_encoded = None
                     if port == 2009:
                         # CPM
-                        cpm_bytes = data[BTP_HIGH:]
+                        cpm_bytes = data[btp_high:]
                         cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
                         old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
                         new_reference_time = get_timestamp_ms(purpose="CPM")
@@ -153,9 +160,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                     zone["expiryTime"] = new_reference_time + delta
                         
                         mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
+
                     elif port == 2001:
                         # CAM
-                        cam_bytes = data[BTP_HIGH:]
+                        cam_bytes = data[btp_high:]
                         cam = CAM.decode("CAM", cam_bytes)
                         old_reference_time = cam["cam"]["generationDeltaTime"]
                         new_reference_time = get_timestamp_ms(purpose="CAM")
@@ -186,9 +194,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                     zone["expiryTime"] = new_reference_time + delta
                         
                         mex_encoded = CAM.encode("CAM", cam)
+
                     elif port == 2018:
                         # VAM
-                        vam_bytes = data[BTP_HIGH:]
+                        vam_bytes = data[btp_high:]
                         vam = VAM.decode("VAM", vam_bytes)
                         old_reference_time = vam["vam"]["generationDeltaTime"]
                         new_reference_time = get_timestamp_ms(purpose="VAM")
@@ -208,6 +217,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                             info["expiryTime"] = new_reference_time + delta
 
                         mex_encoded = VAM.encode("VAM", vam)
+
+                    elif port == 2002:
+                        # TODO DENM
+                        pass
 
                     assert mex_encoded is not None, "Something went wrong in the message modifications"
 
@@ -251,4 +264,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-# write_pcap(stop_event=None, input_filename="/Users/diego/Desktop/PhD/TRACEN-X/track_2_50kmh_refTimeFix.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")
+write_pcap(stop_event=None, input_filename="/Users/diego/Desktop/PhD/TRACEN-X/cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="")
