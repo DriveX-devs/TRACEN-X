@@ -79,9 +79,9 @@ udpSocket.on('message', (msg, rinfo) => {
             console.log("VehicleVisualizer: The server received a terminate message. The execution will be terminated.");
             process.exit(0);
         } else if (msg_fields[0] == "object") {
-            const lat = parseFloat(msg_fields[2]);
-            const lon = parseFloat(msg_fields[3]);
-            const heading = parseFloat(msg_fields[5]);
+            // const lat = parseFloat(msg_fields[2]);
+            // const lon = parseFloat(msg_fields[3]);
+            // const heading = parseFloat(msg_fields[5]);
             // console.log(`Received data - Lat: ${lat}, Lon: ${lon}, Heading: ${heading}`);
             io.sockets.send(msg.toString());
         } else {

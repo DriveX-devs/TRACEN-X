@@ -17,6 +17,12 @@ BTP_HIGH = 44
 BTP_PORT_HIGH = 2
 ETHER_LENGTH = 14
 
+CONVERSION_CONSTANT = 1e7
+PERCEIVED_OBJ_CONT_IDX = 5
+CONSTANT_PERCEIVED_OBJ = 2
+
+CAM_ID_SET = set()
+
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all.asn"
@@ -70,34 +76,59 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
                 data = raw(pkt)[ETHER_LENGTH:]
                 btp = data[BTP_LOW: BTP_HIGH]
                 port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
-                mex_encoded = None
+                while not MAP_OPENED:
+                    startup_time = time.time() * 1e6
+                _, ego_lon, _ = visualizer.get_ego_position()
+                utm_zone = int((ego_lon + 180) // 6) + 1
+                proj_tmerc = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84', datum='WGS84')
                 if port == 2009:
                     # CPM
                     cpm_bytes = data[BTP_HIGH:]
                     cpm = CPM.decode("CollectivePerceptionMessage", cpm_bytes)
                     station_id = cpm["header"]["stationId"]
-                    lat = cpm["payload"]["managementContainer"]["referencePosition"]["latitude"]
-                    lon = cpm["payload"]["managementContainer"]["referencePosition"]["longitude"]
-                    while not MAP_OPENED:
-                        startup_time = time.time() * 1e6
-                    manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat,
-                               longitude=lon,
-                               heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
-                               station_id=station_id, type=5)
+                    ref_lat = cpm["payload"]["managementContainer"]["referencePosition"]["latitude"] / CONVERSION_CONSTANT
+                    ref_lon = cpm["payload"]["managementContainer"]["referencePosition"]["longitude"] / CONVERSION_CONSTANT
+                    proj = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84', datum='WGS84')
+                    ref_x, ref_y = proj(ref_lon, ref_lat)
+                    for idx_j, container in enumerate(cpm['payload']['cpmContainers']):
+                        if cpm['payload']['cpmContainers'][idx_j]['containerId'] == 1:
+                            originating_veh_container = CPM.decode("OriginatingVehicleContainer", cpm["payload"]['cpmContainers'][idx_j]['containerData'])
+                            heading = originating_veh_container["orientationAngle"]["value"] / 100
+                            if station_id not in CAM_ID_SET:
+                                manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True,
+                                           fifo_path=fifo_path, latitude=ref_lat, longitude=ref_lon,
+                                           heading=heading, server_ip=server_ip, server_port=server_port,
+                                           visualizer=visualizer,
+                                           station_id=station_id, type=6)
+                        if cpm['payload']['cpmContainers'][idx_j]['containerId'] == PERCEIVED_OBJ_CONT_IDX:
+                            perceived_object_container = CPM.decode("PerceivedObjectContainer", cpm["payload"]['cpmContainers'][idx_j]['containerData'])
+                            for idx_i, objs in enumerate(perceived_object_container['perceivedObjects']):
+                                obj_id = objs["objectId"]
+                                local_y = objs["position"]["yCoordinate"]["value"] / 100
+                                local_x = objs["position"]["xCoordinate"]["value"] / 100
+                                abs_x = ref_x + local_x + CONSTANT_PERCEIVED_OBJ
+                                abs_y = ref_y + local_y + CONSTANT_PERCEIVED_OBJ
+                                lon, lat = proj(abs_x, abs_y, inverse=True)
+                                manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True,
+                                           fifo_path=fifo_path, latitude=lat, longitude=lon,
+                                           heading=None, server_ip=server_ip, server_port=server_port,
+                                           visualizer=visualizer, station_id=obj_id, type=5)
 
                 elif port == 2001:
                     # CAM
                     cam_bytes = data[BTP_HIGH:]
                     cam = CAM.decode("CAM", cam_bytes)
                     station_id = cam["header"]["stationID"]
-                    print(cam)
-                    lat = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["latitude"]
-                    lon = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["longitude"]
+                    lat = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["latitude"] / CONVERSION_CONSTANT
+                    lon = cam["cam"]["camParameters"]["basicContainer"]["referencePosition"]["longitude"] / CONVERSION_CONSTANT
+                    heading = cam["cam"]["camParameters"]["highFrequencyContainer"][1]["heading"]["headingValue"] / 10
                     while not MAP_OPENED:
                         startup_time = time.time() * 1e6
+                    if station_id not in CAM_ID_SET:
+                        CAM_ID_SET.add(station_id)
                     manage_map(GNSS_flag=False, CAN_flag=False, pcap_flag=True, fifo_path=fifo_path, latitude=lat, longitude=lon,
-                                   heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
-                                   station_id=station_id, type=0)
+                                   heading=heading, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
+                                   station_id=station_id, type=6)
 
                 elif port == 2018:
                     # VAM

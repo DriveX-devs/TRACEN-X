@@ -18,6 +18,7 @@ const GREEN_CIRCLE_ICO_IDX = 2;
 const DETECTED_CAR_ICO_IDX = 3;
 const DETECTED_PEDESTRIAN_ICO_IDX = 4;
 const DETECTED_TRUCK_ICO_IDX = 5;
+const DETECTED_CAR_CAM_IDX = 6;
 
 // Start socket.io()
 const socket = io();
@@ -94,6 +95,13 @@ var greenCircleIcon = L.icon({
 	popupAnchor:  [0, 0] // point from which the popup should open relative to the iconAnchor
 });
 
+var detectedCarCAM = L.icon({
+	iconUrl: './img/car.png',
+
+	iconSize:     [icon_length_car/icon_scale_factor*0.8, icon_height_car/icon_scale_factor*1.2], // size of the icon
+	iconAnchor:   [icon_length_car/(icon_scale_factor*2), icon_height_car/(icon_scale_factor*2)], // point of the icon which will correspond to marker's location
+	popupAnchor:  [0, 0] // point from which the popup should open relative to the iconAnchor
+});
 
 // Receive the first message from the server
 socket.on('message', (msg) => {
@@ -184,110 +192,91 @@ socket.on('message', (msg) => {
 });
 
 // This function is used to update the position (and heading/rotation) of a marker/moving object on the map
-function update_marker(mapref,id,lat,lon,stationtype,heading)
-{
-	if(mapref == null) {
-		console.error("VehicleVisualizer: null map reference when attempting to update an object")
-	} else {
-		// If the object ID has never been seen before, create a new marker
-		if(!(id in markers)) {
-			let newmarker;
-			let initial_icon;
-			let initial_icon_idx;
+function update_marker(mapref, id, lat, lon, stationtype, heading) {
+	if (mapref == null) {
+		console.error("VehicleVisualizer: null map reference when attempting to update an object");
+		return;
+	}
 
-			if(stationtype === 0 || stationtype === 105) {
-                initial_icon = detectedCarIcon;
-                initial_icon_idx = DETECTED_CAR_ICO_IDX;
-			} else {
-				// Set a circular icon when the heading is not available, otherwise use the regular carIcon (i.e. for the time being, a triangle)
-				if(heading >= VIS_HEADING_INVALID) {
-					initial_icon = circleIcon;
-					initial_icon_idx = CIRCLE_ICO_IDX;
-				} else {
-                    if(stationtype === 1  || stationtype === 101) {
-                        initial_icon = detectedPedestrianIcon;
-                        initial_icon_idx = DETECTED_PEDESTRIAN_ICO_IDX;
-                   } else {
-                        if (stationtype === 7 || stationtype === 8 || stationtype === 107) {
-                        initial_icon = detectedTruckIcon;
-                        initial_icon_idx = DETECTED_TRUCK_ICO_IDX;
-                    } else {
-                        initial_icon = carIcon;
-                        initial_icon_idx = CAR_ICO_IDX;
-                    }}
-				}
-			}
+	let marker = markers[id];
 
-			
+	if (!marker) {
+		let initial_icon;
+		let initial_icon_idx;
 
-			// Attempt to use an icon marker
-			newmarker = L.marker([lat,lon], {icon: initial_icon}).addTo(mapref);
-
-            if(stationtype === 110){
-               newmarker.setRotationAngle(0);
-            }else {
-               newmarker.setRotationAngle(heading);
-            }
-
-
-            //newmarker.setRotationAngle(heading);
-
-			// Old circle marker (no more used)
-			// newmarker = L.circleMarker([lat,lon],{radius: 8, fillColor: "#c48612", color: "#000000", weight: 1, opacity: 1, fillOpacity: 0.8}).addTo(mapref);
-			// Set the initial popup value (if the heading is invalid/unavailable, do not specify any value in degrees
-			if(heading < VIS_HEADING_INVALID) {
-				newmarker.bindPopup("ID: "+id+" - Heading: "+heading+" deg");
-			} else {
-				newmarker.bindPopup("ID: "+id+" - Heading: unavailable");
-			}
-			markers[id]=newmarker;
-			markersicons[id]=initial_icon_idx;
-		// If the object ID has already been seen before, just update its attributes (i.e. position, rotation angle and popup content)
+		if (stationtype === 0 || stationtype === 105) {
+			initial_icon = detectedCarIcon;
+			initial_icon_idx = DETECTED_CAR_ICO_IDX;
+		} else if (heading >= VIS_HEADING_INVALID) {
+			initial_icon = circleIcon;
+			initial_icon_idx = CIRCLE_ICO_IDX;
 		} else {
-			let marker = markers[id];
-			marker.setLatLng([lat,lon]);
-            if(stationtype !== 110){
-               marker.setRotationAngle(heading);
-            }
-
-            //marker.setRotationAngle(heading);
-			// Update the popup content if the heading value becomes invalid/unavailable after being available
-			// or if the heading value if actually available (to specify the most up-to-date heading value)
-			if(heading >= VIS_HEADING_INVALID && markersicons[id] === CAR_ICO_IDX) {
-				marker.setPopupContent("ID: "+id+" - Heading: unavailable");
-			} else if(heading < VIS_HEADING_INVALID) {
-				marker.setPopupContent("ID: "+id+" - Heading: "+heading+" deg");
-			}
-
-			if(stationtype !== 0) {
-				// If the heading becomes unavailable or invalid (but it was not before), change the icon of the vehicle to a circle
-				if(heading >= VIS_HEADING_INVALID && (markersicons[id] === CAR_ICO_IDX || markersicons[id] === GREEN_CIRCLE_ICO_IDX)) {
-					marker.setIcon(circleIcon);
-					markersicons[id] = CIRCLE_ICO_IDX;
-                } else {
-                    // If the heading becomes available after being unavailable, change the icon of the vehicle to the "car" icon
-                    if(heading < VIS_HEADING_INVALID && (markersicons[id] === CIRCLE_ICO_IDX || markersicons[id] === GREEN_CIRCLE_ICO_IDX)) {
-                       if(stationtype === 110) {
-                           marker.setIcon(detectedPedestrianIcon);
-                           markersicons[id] = DETECTED_PEDESTRIAN_ICO_IDX;
-                        } else if(stationtype === 117) {
-                            marker.setIcon(detectedTruckIcon);
-                            markersicons[id] = DETECTED_TRUCK_ICO_IDX;
-                        } else {
-                           marker.setIcon(carIcon);
-                           markersicons[id] = CAR_ICO_IDX;
-                       }
-                    }
-                }
+			if (stationtype === 6) {
+				initial_icon = detectedCarCAM;
+				initial_icon_idx = DETECTED_CAR_CAM_IDX;
+			} else if (stationtype === 1 || stationtype === 101 || stationtype === 110) {
+				initial_icon = detectedPedestrianIcon;
+				initial_icon_idx = DETECTED_PEDESTRIAN_ICO_IDX;
+			} else if (stationtype === 7 || stationtype === 8 || stationtype === 107 || stationtype === 117) {
+				initial_icon = detectedTruckIcon;
+				initial_icon_idx = DETECTED_TRUCK_ICO_IDX;
 			} else {
-				if(markersicons[id] === CAR_ICO_IDX || markersicons[id] === CIRCLE_ICO_IDX) {
-					marker.setIcon(greenCircleIcon);
-					markersicons[id] = GREEN_CIRCLE_ICO_IDX;
+				initial_icon = carIcon;
+				initial_icon_idx = CAR_ICO_IDX;
+			}
+		}
+
+		marker = L.marker([lat, lon], { icon: initial_icon }).addTo(mapref);
+		marker.setRotationAngle(stationtype === 110 ? 0 : heading);
+		marker.bindPopup(
+			heading < VIS_HEADING_INVALID
+				? `ID: ${id} - Heading: ${heading} deg`
+				: `ID: ${id} - Heading: unavailable`
+		);
+		markers[id] = marker;
+		markersicons[id] = initial_icon_idx;
+	} else {
+		// Marker already exists, just update
+		marker.setLatLng([lat, lon]);
+		if (stationtype !== 110) {
+			marker.setRotationAngle(heading);
+		}
+
+		if (heading >= VIS_HEADING_INVALID && markersicons[id] === CAR_ICO_IDX) {
+			marker.setPopupContent(`ID: ${id} - Heading: unavailable`);
+		} else if (heading < VIS_HEADING_INVALID) {
+			marker.setPopupContent(`ID: ${id} - Heading: ${heading} deg`);
+		}
+
+		// Icon updates
+		if (stationtype !== 0) {
+			if (heading >= VIS_HEADING_INVALID && (markersicons[id] === CAR_ICO_IDX || markersicons[id] === GREEN_CIRCLE_ICO_IDX)) {
+				marker.setIcon(circleIcon);
+				markersicons[id] = CIRCLE_ICO_IDX;
+			} else if (heading < VIS_HEADING_INVALID && (markersicons[id] === CIRCLE_ICO_IDX || markersicons[id] === GREEN_CIRCLE_ICO_IDX)) {
+				if (stationtype === 110 || stationtype === 1 || stationtype === 101) {
+					marker.setIcon(detectedPedestrianIcon);
+					markersicons[id] = DETECTED_PEDESTRIAN_ICO_IDX;
+				} else if (stationtype === 117 || stationtype === 7 || stationtype === 8 || stationtype === 107) {
+					marker.setIcon(detectedTruckIcon);
+					markersicons[id] = DETECTED_TRUCK_ICO_IDX;
+				} else if (stationtype === 6) {
+					marker.setIcon(detectedCarCAM);
+					markersicons[id] = DETECTED_CAR_CAM_IDX;
+				} else {
+					marker.setIcon(carIcon);
+					markersicons[id] = CAR_ICO_IDX;
 				}
+			}
+		} else {
+			if (markersicons[id] === CAR_ICO_IDX || markersicons[id] === CIRCLE_ICO_IDX) {
+				marker.setIcon(greenCircleIcon);
+				markersicons[id] = GREEN_CIRCLE_ICO_IDX;
 			}
 		}
 	}
 }
+
 
 // This function is used to draw the whole map at the beginning, on which vehicles will be placed
 // It expects as arguments the lat and lon value where the map should be centered
