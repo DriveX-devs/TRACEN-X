@@ -144,7 +144,7 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
 
                 elif port == 2002:
                     # TODO DENM
-                    pass
+                    continue
 
                 delta_time_us_real = time.time() * 1e6 - startup_time
                 delta_time_us_simulation = pkt_ts_us - start_time_us
