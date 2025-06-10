@@ -38,15 +38,7 @@ def write_serial(stop_event: Any, server_device: str, client_device: str, baudra
         startup_time = time.time() * 1e6
         for d in data:
             delta_time = d["timestamp"] - previous_time
-            message_type = d["type"]
-            if message_type == "Unknown":
-                continue
-            content = d["data"]
-            if message_type == "UBX":
-                content = bytes.fromhex(content)
-            else:
-                # For the NMEA messages we need to encode the content for the serial emulator and decode it for the GUI (to obtain a string)
-                content = content.encode()
+
             # Calculate a variable delta time factor to adjust the time of the serial write to be as close as possible to a real time simulation
             # delta_time_us represents the real time in microseconds from the beginning of the simulation to the current time
             delta_time_us_real = time.time() * 1e6 - startup_time
@@ -63,6 +55,17 @@ def write_serial(stop_event: Any, server_device: str, client_device: str, baudra
             else:
                 # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
+
+            message_type = d["type"]
+            if message_type == "Unknown":
+                continue
+            content = d["data"]
+            if message_type == "UBX":
+                content = bytes.fromhex(content)
+            else:
+                # For the NMEA messages we need to encode the content for the serial emulator and decode it for the GUI (to obtain a string)
+                content = content.encode()
+
             ser.write(content)
             if first_send is None:
                 first_send = time.time()

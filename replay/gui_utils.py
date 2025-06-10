@@ -63,7 +63,6 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
 
     base_ts = pcap[0].time  # epoch time in seconds
     startup_time = time.time() * 1e6
-    packets = list()
     try:
         for i, pkt in enumerate(pcap):
             try:
@@ -71,16 +70,29 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
 
                 if start_time is not None and pkt_ts_us < start_time:
                     continue
+
                 if end_time is not None and pkt_ts_us > end_time:
                     break
+
+                while not MAP_OPENED:
+                    startup_time = time.time() * 1e6
+
+                delta_time_us_real = time.time() * 1e6 - startup_time
+                delta_time_us_simulation = pkt_ts_us - start_time_us
+                variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+                if variable_delta_us_factor > 0:
+                    # Wait for the real time to be as close as possible to the simulation time
+                    # print("Sleeping for:", variable_delta_us_factor / 1e6)
+                    time.sleep(variable_delta_us_factor / 1e6)
+                else:
+                    # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                    pass
+
                 data = raw(pkt)[ETHER_LENGTH:]
                 btp = data[BTP_LOW: BTP_HIGH]
                 port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
-                while not MAP_OPENED:
-                    startup_time = time.time() * 1e6
                 _, ego_lon, _ = visualizer.get_ego_position()
                 utm_zone = int((ego_lon + 180) // 6) + 1
-                proj_tmerc = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84', datum='WGS84')
                 if port == 2009:
                     # CPM
                     cpm_bytes = data[BTP_HIGH:]
@@ -146,16 +158,6 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
                     # TODO DENM
                     continue
 
-                delta_time_us_real = time.time() * 1e6 - startup_time
-                delta_time_us_simulation = pkt_ts_us - start_time_us
-                variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-                if variable_delta_us_factor > 0:
-                    # Wait for the real time to be as close as possible to the simulation time
-                    # print("Sleeping for:", variable_delta_us_factor / 1e6)
-                    time.sleep(variable_delta_us_factor / 1e6)
-                else:
-                    # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-                    pass
             except Exception as e:
                 # Malformed packet
                 continue
@@ -196,6 +198,24 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
         startup_time = time.time() * 1e6
         for d in data:
             delta_time = d["timestamp"] - previous_time
+
+            while not MAP_OPENED:
+                startup_time = time.time() * 1e6
+
+            start_time_us = start_time if start_time else 0
+            # Calculate the delta time in the recording between the current message and the start time
+            delta_time_us_simulation = d["timestamp"] - start_time_us
+            # Calculate the real time in microseconds from the beginning of the simulation to the current time
+            delta_time_us_real = time.time() * 1e6 - startup_time
+            # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
+            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+            if variable_delta_us_factor > 0:
+                # Wait for the real time to be as close as possible to the simulation time
+                time.sleep(variable_delta_us_factor / 1e6)
+            else:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                pass
+
             arbitration_id = d["arbitration_id"]
             content = d["data"]
             # Get the message from the CAN database
@@ -243,25 +263,11 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
                         ego_y += yDistance
                         # Reverse transformation: convert projected (x, y) back to geographic coordinates (lat, lon)
                         lon1, lat1 = proj_tmerc(ego_x, ego_y, inverse=True)
-                        while not MAP_OPENED:
-                            startup_time = time.time() * 1e6
                         manage_map(GNSS_flag=False, CAN_flag=True, pcap_flag=False, fifo_path=fifo_path, latitude=lat1, longitude=lon1,
                                    heading=None, server_ip=server_ip, server_port=server_port, visualizer=visualizer,
                                    station_id=arbitration_id, type=5)
                     pass
-            start_time_us = start_time if start_time else 0
-            # Calculate the delta time in the recording between the current message and the start time
-            delta_time_us_simulation = d["timestamp"] - start_time_us
-            # Calculate the real time in microseconds from the beginning of the simulation to the current time
-            delta_time_us_real = time.time() * 1e6 - startup_time
-            # Update the variable_delta_time_us_factor to adjust the time of the CAN write to be as close as possible to a real time simulation
-            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            if variable_delta_us_factor > 0:
-                # Wait for the real time to be as close as possible to the simulation time
-                time.sleep(variable_delta_us_factor / 1e6)
-            else:
-                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-                pass
+
             if end_time and time.time() * 1e6 - startup_time > end_time:
                 break
     except Exception as e:
@@ -326,6 +332,17 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
 
         for d in data:
             delta_time = d["timestamp"] - previous_time
+
+            delta_time_us_real = time.time() * 1e6 - startup_time
+            start_time_us = start_time if start_time else 0
+            delta_time_us_simulation = d["timestamp"] - start_time_us
+            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+            if variable_delta_us_factor > 0:
+                time.sleep(variable_delta_us_factor / 1e6)
+            else:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                pass
+
             message_type = d["type"]
             if message_type == "Unknown":
                 continue
@@ -348,15 +365,7 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
                     longitude = tmp_lon
                 if tmp_heading:
                     heading = tmp_heading
-            delta_time_us_real = time.time() * 1e6 - startup_time
-            start_time_us = start_time if start_time else 0
-            delta_time_us_simulation = d["timestamp"] - start_time_us
-            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            if variable_delta_us_factor > 0:
-                time.sleep(variable_delta_us_factor / 1e6)
-            else:
-                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-                pass
+
             if first_send is None:
                 first_send = time.time()
             previous_time = d["timestamp"]

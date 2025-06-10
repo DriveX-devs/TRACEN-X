@@ -128,6 +128,17 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             if end_time is not None and pkt_ts_us > end_time:
                 break
 
+            delta_time_us_real = time.time() * 1e6 - startup_time
+            delta_time_us_simulation = pkt_ts_us - start_time_us
+            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
+            if variable_delta_us_factor > 0:
+                # Wait for the real time to be as close as possible to the simulation time
+                # print("Sleeping for:", variable_delta_us_factor / 1e6)
+                time.sleep(variable_delta_us_factor / 1e6)
+            else:
+                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
+                pass
+
             new_pkt = None
             if update_datetime:
                 raw_part = None
@@ -332,23 +343,13 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             else:
                 new_pkt = raw(pkt)
 
-            assert new_pkt, "Something went wrong in new packet building"
+            assert new_pkt is not None, "Something went wrong in new packet building"
 
-            assert sock, "Something went wrong in socket creation or binding"
+            assert sock is not None, "Something went wrong in socket creation or binding"
 
             if new_pcap != "":
                 packets.append(new_pkt)
-                    
-            delta_time_us_real = time.time() * 1e6 - startup_time
-            delta_time_us_simulation = pkt_ts_us - start_time_us
-            variable_delta_us_factor = delta_time_us_simulation - delta_time_us_real
-            if variable_delta_us_factor > 0:
-                # Wait for the real time to be as close as possible to the simulation time
-                # print("Sleeping for:", variable_delta_us_factor / 1e6)
-                time.sleep(variable_delta_us_factor / 1e6)
-            else:
-                # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
-                pass
+
             try:
                 sock.send(new_pkt)
             except Exception as e:

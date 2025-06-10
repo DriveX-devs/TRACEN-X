@@ -35,14 +35,7 @@ def write_CAN(stop_event: Any, device: str, input_filename: str, db_file: str, s
         startup_time = time.time() * 1e6
         for d in data:
             delta_time = d["timestamp"] - previous_time
-            arbitration_id = d["arbitration_id"]
-            content = d["data"]
-            # Get the message from the CAN database
-            message = db.get_message_by_frame_id(arbitration_id)
-            if message:
-                # Encode the content of the message
-                data = db.encode_message(message.frame_id, content)
-                final_message = can.Message(arbitration_id=message.frame_id, data=data, is_extended_id=False)
+
             start_time_us = start_time if start_time else 0
             # Calculate the delta time in the recording between the current message and the start time
             delta_time_us_simulation = d["timestamp"] - start_time_us
@@ -56,6 +49,15 @@ def write_CAN(stop_event: Any, device: str, input_filename: str, db_file: str, s
             else:
                 # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
+
+            arbitration_id = d["arbitration_id"]
+            content = d["data"]
+            # Get the message from the CAN database
+            message = db.get_message_by_frame_id(arbitration_id)
+            if message:
+                # Encode the content of the message
+                data = db.encode_message(message.frame_id, content)
+                final_message = can.Message(arbitration_id=message.frame_id, data=data, is_extended_id=False)
             if message:
                 # Write the message to the CAN bus
                 if first_send is None:
