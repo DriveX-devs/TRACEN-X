@@ -5,6 +5,7 @@ import asn1tools as asn
 from scapy.all import *
 from copy import  deepcopy
 
+# Normal packet (without security layer) constants
 GEONET_LENGTH = 40
 ETHER_LENGTH = 14
 GEONET_TS_LOW = 20
@@ -13,27 +14,31 @@ BTP_LOW = 40
 BTP_HIGH = 44
 BTP_PORT_HIGH = 2
 
+# Security packet constants
+ETH_SRC_ADDR = 6
 SECURITY_PAD = 7
 BTP_PAD = 4
 SOURCE_ADDR_PAD = 6
 TIMESTAMP_PAD = 4
-
-TIME_SHIFT = 1072915200000
-TS_MAX1 = 4294967296
-MODULO_WRAP = 4398046511103
-MODULO_CAM_VAM = 65536
-
+PAYLOAD_PAD = 6
 BTPS = {
     b"\x07\xd2\x00\x00": "DENM",
     b"\x07\xd1\x00\x00": "CAM",
     b"\x07\xd9\x00\x00": "CPM",
     b"\x07\xe2\x00\x00": "VAM",
 }
+
+# General facility constants
+TIME_SHIFT = 1072915200000
+TS_MAX1 = 4294967296
+MODULO_WRAP = 4398046511103
+MODULO_CAM_VAM = 65536
 PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
 
+# Load the ASN1 files before starting the process
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
-cam_asn = "./data/asn/CAM-all2.asn"
+cam_asn = "./data/asn/CAM-all-old.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
@@ -127,76 +132,104 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             if update_datetime:
                 raw_part = None
                 try:
+                    # Extract the Ethernet II part
                     ether_part = raw(pkt)[:ETHER_LENGTH]
+                    # Take the rest ot the packet
                     data = raw(pkt)[ETHER_LENGTH:]
+                    # Check if the security layer is active
                     security = False if data[:1] == b'\x11' else True
+                    # Set the fields for pkt reconstruction to None to check if they will be filled properly
                     found = False
-                    bytes = None
+                    facilities = None
                     port = None
                     btp = None
+                    new_geonet = None
+                    tail_security = None
                     if not security:
+                        # Packet without the security layer
+                        # Extract the GeoNet and calculate the new timestamp
                         geonet = data[:GEONET_LENGTH]
                         current_timestamp = get_timestamp_ms(purpose="GeoNet")
                         assert current_timestamp > 0, "Error in time calculation"
                         current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
+                        # Build the new geonet with the updated timestamp
                         new_geonet = geonet[:GEONET_TS_LOW] + current_timestamp + geonet[GEONET_TS_HIGH:]
+                        # Isolate BTP to retrieve the port number
                         btp = data[BTP_LOW : BTP_HIGH]
                         port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
-                        bytes = data[BTP_HIGH:]
+                        # Take the rest of the packet (Facilities layer)
+                        facilities = data[BTP_HIGH:]
                     else:
-                        msg_type = None
+                        # Packet with the security layer
                         btp_idx = 0
                         while True:
+                            # Search through the packet to find a match for the known BTPs (supported for CAM, CPM, VAM, DENM)
                             if btp_idx + BTP_PAD > len(data):
                                 break
+                            # Take 4 bytes slice
                             it = data[btp_idx:btp_idx+BTP_PAD]
                             if it in BTPS.keys():
                                 found = True
-                                msg_type = BTPS[it]
                                 break
                             else:
                                 btp_idx += 1
-                                if btp_idx > len(data):
-                                    break
+
                         if found:
-                            source_addr = ether_part[6:-2]
+                            # We found the BTP
+                            # Take the source MAC address from the Ethernet II
+                            source_addr = ether_part[ETH_SRC_ADDR:-2]
+                            # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
                             geonet = data[:btp_idx]
                             current_timestamp = get_timestamp_ms(purpose="GeoNet")
                             assert current_timestamp > 0, "Error in time calculation"
                             current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
+                            # Prepare variables to be filled in the next search
                             timestamp_idx = 0
                             payload_length = None
-                            found = False
+                            found = False  # Put "found" to False again for another search
                             while True:
+                                # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
                                 if timestamp_idx + SOURCE_ADDR_PAD > len(geonet):
                                     break
+                                # Take 6 bytes slice
                                 it = geonet[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
                                 if it == source_addr:
                                     found = True
-                                    tmp = deepcopy(timestamp_idx)
-                                    tmp -= 6
-                                    payload_length = int.from_bytes(geonet[tmp: tmp+2], byteorder="big")
+                                    payload_idx = deepcopy(timestamp_idx)
+                                    # We know that the Payload Length is exactly 6 bytes behind the Source MAC Address position
+                                    payload_idx -= PAYLOAD_PAD
+                                    # Read Payload Length (used after)
+                                    payload_length = int.from_bytes(geonet[payload_idx: payload_idx+2], byteorder="big")
+                                    # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
                                     timestamp_idx += SOURCE_ADDR_PAD
                                     break
                                 else:
                                     timestamp_idx += 1
-                                    if timestamp_idx > len(geonet):
-                                        break
+
                             if found:
+                                # If all the searches went well we can create the New GeoNet
                                 new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
+                                # Ad-hoc trick, the Payload Length always includes the BTP length, we are interested only in the Facilities
                                 payload_length -= BTP_PAD
+                                # Extract the BTP to know the port
                                 btp = data[btp_idx:btp_idx+BTP_PAD]
                                 port = int.from_bytes(btp[:2], byteorder="big")
+                                # Extract the rest of the packet (Facilities + Security Tail)
                                 rest_pkt = data[btp_idx + BTP_PAD:]
-                                bytes = rest_pkt[:payload_length]
+                                # Take the Facilities
+                                facilities = rest_pkt[:payload_length]
+                                # Take the Security Tail
+                                tail_security = rest_pkt[payload_length:]
 
-                    if not bytes or not port or not btp:
+                    if not new_geonet or not btp or not facilities or not port:
+                        # From both cases (with and without security layer), we need some basic information
+                        # Otherwise, the packet is treated as not known and will be normally sent
                         new_pkt = raw(pkt)
                     else:
                         mex_encoded = None
                         if port == 2009:
-                            # CPM
-                            cpm = CPM.decode("CollectivePerceptionMessage", bytes)
+                            # CPM, modify the Reference Time
+                            cpm = CPM.decode("CollectivePerceptionMessage", facilities)
                             old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
                             new_reference_time = get_timestamp_ms(purpose="CPM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -225,8 +258,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
 
                         elif port == 2001:
-                            # CAM
-                            cam = CAM.decode("CAM", bytes)
+                            # CAM, modify the Generation Delta Time
+                            cam = CAM.decode("CAM", facilities)
                             old_reference_time = cam["cam"]["generationDeltaTime"]
                             new_reference_time = get_timestamp_ms(purpose="CAM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -258,8 +291,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = CAM.encode("CAM", cam)
 
                         elif port == 2018:
-                            # VAM
-                            vam = VAM.decode("VAM", bytes)
+                            # VAM, modify the Generation Delta Time
+                            vam = VAM.decode("VAM", facilities)
                             old_reference_time = vam["vam"]["generationDeltaTime"]
                             new_reference_time = get_timestamp_ms(purpose="VAM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -281,20 +314,27 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                         elif port == 2002:
                             # TODO DENM
-                            mex_encoded = bytes
+                            mex_encoded = facilities
 
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
 
+                        # Build the new packet
                         raw_part = new_geonet + btp + mex_encoded
-
                         if ether_part and raw_part:
                             new_pkt = ether_part + raw_part
+                        if security:
+                            # Add the Security Tail
+                            new_pkt = new_pkt + tail_security
 
                 except Exception as e:
                     print("Malformed packet encountered")
                     continue
             else:
                 new_pkt = raw(pkt)
+
+            assert new_pkt, "Something went wrong in new packet building"
+
+            assert sock, "Something went wrong in socket creation or binding"
 
             if new_pcap != "":
                 packets.append(new_pkt)
@@ -309,11 +349,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             else:
                 # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                 pass
-            if sock and new_pkt:
-                try:
-                    sock.send(new_pkt)
-                except Exception as e:
-                    print(f"Error: {e}")
+            try:
+                sock.send(new_pkt)
+            except Exception as e:
+                print(f"Error: {e}")
     except Exception as e:
         print(f"Error: {e}")
     

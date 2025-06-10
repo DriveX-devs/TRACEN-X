@@ -25,7 +25,7 @@ CAM_ID_SET = set()
 
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
-cam_asn = "./data/asn/CAM-all.asn"
+cam_asn = "./data/asn/CAM-all-old.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
