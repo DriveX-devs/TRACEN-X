@@ -113,7 +113,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
     base_ts = pcap[0].time  # epoch time in seconds
     startup_time = time.time() * 1e6
-    packets = list()
     try:
         for i, pkt in enumerate(pcap):
             print(i)
@@ -348,7 +347,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             assert sock is not None, "Something went wrong in socket creation or binding"
 
             if new_pcap != "":
-                packets.append(new_pkt)
+                wrpcap(new_pcap, new_pkt, append=True)
 
             try:
                 sock.send(new_pkt)
@@ -358,10 +357,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
         print(f"Error: {e}")
     
     finally:
-        if new_pcap != "" and len(packets) > 0:
-            print("Writing new pcap file")
-            wrpcap(new_pcap, packets)
-
         print(f"Pcap reproduction on interface {interface} terminated")
 
 
