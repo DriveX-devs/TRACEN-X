@@ -115,7 +115,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     startup_time = time.time() * 1e6
     try:
         for i, pkt in enumerate(pcap):
-            print(i)
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
             if stop_event and stop_event.is_set():
