@@ -42,9 +42,11 @@ PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
+denm_asn = "./data/asn/DENM-all-old.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
+DENM = asn.compile_files(denm_asn, "uper")
 
 class AMQPSender(MessagingHandler):
     def __init__(self, server, port, topic):
@@ -93,7 +95,6 @@ def compute_properties():
 
 
 def get_timestamp_ms(purpose: str) -> int:
-
     if purpose == "CPM" or purpose == "GeoNet":
         try:
             now = time.clock_gettime_ns(time.CLOCK_TAI)
@@ -381,7 +382,11 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = VAM.encode("VAM", vam)
 
                         elif port == 2002:
-                            # TODO DENM
+                            denm = DENM.decode("DENM", facilities)
+                            old_reference_time = denm["denm"]["generationDeltaTime"]
+                            new_reference_time = get_timestamp_ms(purpose="DENM")
+                            assert new_reference_time > 0, "Error in time calculation"
+                            denm["denm"]["generationDeltaTime"] = new_reference_time
                             mex_encoded = facilities
 
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
@@ -395,7 +400,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             new_pkt = new_pkt + tail_security
 
                 except Exception as e:
-                    print("Malformed packet encountered")
+                    print(f"Error while processing packet {i}: {e}")
                     continue
             else:
                 new_pkt = raw(pkt)
@@ -429,4 +434,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-# write_pcap(stop_event=None, input_filename="/mnt/xtra/TRACEN-X/cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap")
+# write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")
