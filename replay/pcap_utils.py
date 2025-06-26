@@ -4,6 +4,9 @@ from typing import Any
 import asn1tools as asn
 from scapy.all import *
 from copy import  deepcopy
+from proton import Message
+from proton.reactor import Container
+from proton.handlers import MessagingHandler
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
@@ -32,18 +35,68 @@ BTPS = {
 TIME_SHIFT = 1072915200000
 TS_MAX1 = 4294967296
 MODULO_WRAP = 4398046511103
-MODULO_CAM_VAM = 65536
-PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
+MODULO_CAM_VAM_DENM = 65536
+PURPOSES = ["GeoNet", "CPM", "CAM", "VAM", "DENM"]
 
 # Load the ASN1 files before starting the process
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
+denm_asn = "./data/asn/DENM-all-old.asn"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
+DENM = asn.compile_files(denm_asn, "uper")
+
+class AMQPSender(MessagingHandler):
+    def __init__(self, server, port, topic):
+        super().__init__()
+        self.server = server
+        self.port = port
+        self.topic = topic
+        self.sender = None
+        self.container = Container(self)
+
+    def on_start(self, event) -> None:
+        try:
+            conn = event.container.connect(f"{self.server}:{self.port}")
+            self.sender = event.container.create_sender(conn, self.topic)
+        except Exception as e:
+            print(f"Error: {e}")
+            exit(-1)
+
+    def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
+        success = True
+        try:
+            if self.sender:
+                msg = Message(
+                    id=message_id,
+                    body=raw_bytes,
+                    properties=properties or {},
+                    content_type="application/octet-stream"
+                )
+                self.sender.send(msg)
+        except Exception as e:
+            print(f"Sending error: {e}")
+            success = False
+        finally:
+            return success
+
+    def run(self) -> None:
+        self.container.run()
+
+    def stop(self) -> None:
+        self.container.stop()
+
+
+def compute_properties():
+    # TODO
+    return {}
+
 
 def get_timestamp_ms(purpose: str) -> int:
+
+    assert purpose in PURPOSES, f"Verify that the purpose for timestamp computation is in {PURPOSES}"
 
     if purpose == "CPM" or purpose == "GeoNet":
         try:
@@ -57,8 +110,6 @@ def get_timestamp_ms(purpose: str) -> int:
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-        
-        assert purpose in PURPOSES, f"Verify that the purpose for timestamp computation is in {PURPOSES}"
         
         # Convert to seconds + microseconds
         seconds = now // 1e9
@@ -74,18 +125,18 @@ def get_timestamp_ms(purpose: str) -> int:
 
         # Apply ITS epoch and ETSI wraparound
         return int((millis - TIME_SHIFT) % MODULO_WRAP) if purpose == "CPM" else int((millis - TIME_SHIFT) % TS_MAX1)
-    elif purpose == "VAM" or purpose == "CAM":
+    elif purpose == "VAM" or purpose == "CAM" or purpose == "DENM":
         try:
             now = int(time.time() * 1e3)
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-        return (now - TIME_SHIFT) % MODULO_CAM_VAM
+        return (now - TIME_SHIFT) % MODULO_CAM_VAM_DENM
     
     return -1
 
 
-def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str):
+def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str):
     """
     Sends packets from a pcap file to a network interface within a given time window.
 
@@ -96,7 +147,17 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     - start_time (int): Start time in microseconds.
     - end_time (int): End time in microseconds.
     - new_pcap (str): New pcap file to write the reproduced packets
+    - enable_amqp (bool): Whether AMQP messaging is enabled
+    - amqp_server_ip (str): IP address of the AMQP server
+    - amqp_server_port (str): Port of the AMQP server
+    - amqp_topic (str): Topic to publish messages to on the AMQP server
     """
+
+    if enable_amqp:
+        amqp_sender = AMQPSender(amqp_server_ip, amqp_server_port, amqp_topic)
+        amqp_thread = threading.Thread(target=amqp_sender.run, daemon=True)
+        amqp_thread.start()
+
     pcap = rdpcap(input_filename)
     assert pcap, "Pcap file is empty"
 
@@ -322,8 +383,23 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = VAM.encode("VAM", vam)
 
                         elif port == 2002:
-                            # TODO DENM
-                            mex_encoded = facilities
+                            denm = DENM.decode("DENM", facilities)
+                            old_reference_time = denm["denm"]["management"]["detectionTime"]
+                            new_reference_time = get_timestamp_ms(purpose="DENM")
+                            assert new_reference_time > 0, "Error in time calculation"
+                            denm["denm"]["management"]["detectionTime"] = new_reference_time
+                            denm["denm"]["management"]["referenceTime"] = new_reference_time
+
+                            # TODO to test
+                            if "ProtectedCommunicationZonesRSU" in denm["denm"]:
+                                zones = denm["denm"]["ProtectedCommunicationZonesRSU"]
+                                for zone in zones:
+                                    if "expiryTime" in zone:
+                                        old_expiry_time = zone["expiryTime"]
+                                        delta = old_expiry_time - old_reference_time
+                                        zone["expiryTime"] = new_reference_time + delta
+
+                            mex_encoded = DENM.encode("DENM", denm)
 
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
 
@@ -336,7 +412,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             new_pkt = new_pkt + tail_security
 
                 except Exception as e:
-                    print("Malformed packet encountered")
+                    print(f"Error while processing packet {i}: {e}")
                     continue
             else:
                 new_pkt = raw(pkt)
@@ -350,6 +426,12 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
             try:
                 sock.send(new_pkt)
+                if enable_amqp:
+                    # Send the packet to the AMQP broker
+                    properties = compute_properties()
+                    succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
+                    if not succ:
+                        print("ERROR on message sending to the AMQP broker!")
             except Exception as e:
                 print(f"Error: {e}")
     except Exception as e:
@@ -357,8 +439,11 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     
     finally:
         print(f"Pcap reproduction on interface {interface} terminated")
+        if enable_amqp:
+            amqp_sender.stop()
+            amqp_thread.join()
 
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-# write_pcap(stop_event=None, input_filename="/mnt/xtra/TRACEN-X/cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap")
+# write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")

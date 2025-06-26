@@ -1,5 +1,6 @@
 pyserial
 cantools
 pyproj
-scapy
 asn1tools
+scapy
+python-qpid-proton

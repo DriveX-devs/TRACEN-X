@@ -34,9 +34,9 @@ def main():
     - --end-time (int): The time to stop reading in seconds. If not specified, will write until the end of the file.
     - --enable-gui (bool): Whether to display the GUI. Default is False. Can be activated by writing it.
     - --enable-test-rate (int): Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False. Can be activated by writing it.
-    - --http-port (int): The port for the HTTP server. Default is 8080.
-    - --server-ip (str): The IP address of the server. Default is 127.0.0.1
-    - --server-port (int): The port of the server. Default is 48110.
+    - --visualizer-http-port (int): The port for the HTTP server for the visualizer (GUI). Default is 8080.
+    - --visualizer-server-ip (str): The IP address of the server for the visualizer (GUI). Default is 127.0.0.1
+    - --visualizer-server-port (int): The port of the server for the visualizer (GUI). Default is 48110.
     - --enable-CAN (bool): Whether to enable the CAN emulator. Default is False. Can be activated by writing it.
     - --CAN-db (str): The CAN database file. Default is "./data/can_db/motohawk.dbc".
     - --CAN-device (str): The CAN device to write to. Default is "vcan0".
@@ -48,9 +48,13 @@ def main():
     - --interface (str): The network interface to which write the pcap content. Default is "wlan0".
     - --pcap-filename (str): The pcap file to read from for pcap emulation. Default is "./data/pcap_output/trace.pcapng".
     - --update-datetime (bool): If the emulation of pcap trace must update the packets datetime to the current one. Default is False.
+    - --enable-amqp (bool): Whether AMQP messaging is enabled. Default is False. Can be activated by writing it.
+    - --amqp-server-ip (str): The IP address of the AMQP server. Default is 127.0.0.1.
+    - --amqp-server-port (str): The Port of the AMQP server. Default is 5867.
+    - --amqp-topic (str): The Topic to publish messages to on the AMQP server. Default is tracenx.
 
     Example:
-    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng
+    python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --visualizer-http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng --enable-amqp --amqp-server-ip 127.0.0.1 --amqp-server-port 5867 --amqp-topic tracenx
     """
     args = argparse.ArgumentParser()
     args.add_argument("--enable-serial", action="store_true", help="Enable serial emulator")
@@ -63,9 +67,9 @@ def main():
     args.add_argument("--enable-serial-gui", action="store_true", help="Whether to display the serial GUI. Default is False", default=False)
     args.add_argument("--enable-CAN-gui", action="store_true", help="Whether to display the CAN GUI. Default is False", default=False)
     args.add_argument("--enable-test-rate", action="store_true", help="Test rate mode. Instead of showing the trace or reproducing it, it will output the positioning (Lat, Lon) update frequency and save the related data, message by message, on a file named replay_out.csv. Default is False", default=False)
-    args.add_argument("--http-port", type=int, help="The port for the HTTP server. Default is 8080", default=8080)
-    args.add_argument("--server-ip", type=str, help="The IP address of the server. Default is 127.0.0.1", default="127.0.0.1")
-    args.add_argument("--server-port", type=int, help="The port of the server. Default is 48110", default=48110)
+    args.add_argument("--visualizer-http-port", type=int, help="The port for the HTTP server for the visualizer (GUI). Default is 8080", default=8080)
+    args.add_argument("--visualizer-server-ip", type=str, help="The IP address of the server for the visualizer (GUI). Default is 127.0.0.1", default="127.0.0.1")
+    args.add_argument("--visualizer-server-port", type=int, help="The port of the server for the visualizer (GUI). Default is 48110", default=48110)
     args.add_argument("--enable-CAN", action="store_true", help="Enable CAN emulator. Default is False", default=False)
     args.add_argument("--CAN-db", type=str, help="The CAN database file", default="./data/can_db/motohawk.dbc")
     args.add_argument("--CAN-device", type=str, help="The CAN device to write to", default="vcan0")
@@ -79,21 +83,29 @@ def main():
     args.add_argument("--update-datetime", action="store_true", help="If the emulation of pcap trace must update the packets datetime to the current one. Default is False", default=False)
     args.add_argument("--new-pcap-file", type=str, help="The new pcap file (if needed) with packets with updated datetime", default="")
     args.add_argument("--enable-pcap-gui", action="store_true", help="Whether to display the pcap GUI. Default is False", default=False)
+    args.add_argument("--enable-amqp", action="store_true", help="Whether AMQP messaging is enabled. Default is False", default=False)
+    args.add_argument("--amqp-server-ip", type=str, help="The IP address of the AMQP server. Default is 127.0.0.1", default="127.0.0.1")
+    args.add_argument("--amqp-server-port", type=int, help="The Port of the AMQP server. Default is 5867", default=5867)
+    args.add_argument("--amqp-topic", type=str, help="The Topic of the AMQP server. Default is tracenx", default="tracenx")
 
     args = args.parse_args()
+
     serial = args.enable_serial
     serial_filename = args.serial_filename
     server_device = args.server_device
     client_device = args.client_device
     baudrate = args.baudrate
     assert baudrate == 115200, "Baudrate must be 115200"
+
     start_time = args.start_time * 1e6 if args.start_time else None
     end_time = args.end_time * 1e6 if args.end_time else None
+
     enable_serial_gui = args.enable_serial_gui
     enable_CAN_gui = args.enable_CAN_gui
-    httpport = args.http_port
-    server_ip = args.server_ip
-    server_port = args.server_port
+    httpport = args.visualizer_http_port
+    server_ip = args.visualizer_server_ip
+    server_port = args.visualizer_server_port
+
     test_rate_enabled = args.enable_test_rate
 
     CAN = args.enable_CAN
@@ -114,6 +126,11 @@ def main():
     update_datetime = args.update_datetime
     new_pcap = args.new_pcap_file
     enable_pcap_gui = args.enable_pcap_gui
+
+    enable_amqp = args.enable_amqp
+    amqp_server_ip = args.amqp_server_ip
+    amqp_server_port = args.amqp_server_port
+    amqp_topic = args.amqp_topic
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
 
@@ -197,7 +214,7 @@ def main():
 
     if enable_pcap:
         assert os.path.exists(pcap_filename)
-        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap))
+        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic))
         pcap_process.start()
 
     try:
