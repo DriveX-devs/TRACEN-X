@@ -35,8 +35,8 @@ BTPS = {
 TIME_SHIFT = 1072915200000
 TS_MAX1 = 4294967296
 MODULO_WRAP = 4398046511103
-MODULO_CAM_VAM = 65536
-PURPOSES = ["GeoNet", "CPM", "CAM", "VAM"]
+MODULO_CAM_VAM_DENM = 65536
+PURPOSES = ["GeoNet", "CPM", "CAM", "VAM", "DENM"]
 
 # Load the ASN1 files before starting the process
 cpm_asn = "./data/asn/CPM-all.asn"
@@ -95,6 +95,9 @@ def compute_properties():
 
 
 def get_timestamp_ms(purpose: str) -> int:
+
+    assert purpose in PURPOSES, f"Verify that the purpose for timestamp computation is in {PURPOSES}"
+
     if purpose == "CPM" or purpose == "GeoNet":
         try:
             now = time.clock_gettime_ns(time.CLOCK_TAI)
@@ -107,8 +110,6 @@ def get_timestamp_ms(purpose: str) -> int:
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-        
-        assert purpose in PURPOSES, f"Verify that the purpose for timestamp computation is in {PURPOSES}"
         
         # Convert to seconds + microseconds
         seconds = now // 1e9
@@ -124,13 +125,13 @@ def get_timestamp_ms(purpose: str) -> int:
 
         # Apply ITS epoch and ETSI wraparound
         return int((millis - TIME_SHIFT) % MODULO_WRAP) if purpose == "CPM" else int((millis - TIME_SHIFT) % TS_MAX1)
-    elif purpose == "VAM" or purpose == "CAM":
+    elif purpose == "VAM" or purpose == "CAM" or purpose == "DENM":
         try:
             now = int(time.time() * 1e3)
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-        return (now - TIME_SHIFT) % MODULO_CAM_VAM
+        return (now - TIME_SHIFT) % MODULO_CAM_VAM_DENM
     
     return -1
 
@@ -383,11 +384,22 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                         elif port == 2002:
                             denm = DENM.decode("DENM", facilities)
-                            old_reference_time = denm["denm"]["generationDeltaTime"]
+                            old_reference_time = denm["denm"]["management"]["detectionTime"]
                             new_reference_time = get_timestamp_ms(purpose="DENM")
                             assert new_reference_time > 0, "Error in time calculation"
-                            denm["denm"]["generationDeltaTime"] = new_reference_time
-                            mex_encoded = facilities
+                            denm["denm"]["management"]["detectionTime"] = new_reference_time
+                            denm["denm"]["management"]["referenceTime"] = new_reference_time
+
+                            # TODO to test
+                            if "ProtectedCommunicationZonesRSU" in denm["denm"]:
+                                zones = denm["denm"]["ProtectedCommunicationZonesRSU"]
+                                for zone in zones:
+                                    if "expiryTime" in zone:
+                                        old_expiry_time = zone["expiryTime"]
+                                        delta = old_expiry_time - old_reference_time
+                                        zone["expiryTime"] = new_reference_time + delta
+
+                            mex_encoded = DENM.encode("DENM", denm)
 
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
 
