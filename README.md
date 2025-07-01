@@ -38,7 +38,7 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
 
 ### Software Requirements
 - Linux-based operating system (e.g., Ubuntu, Debian, etc.)
-- Python 3.x
+- Python 3.9 or higher
 - socat (for serial emulation)
 - [Optional] can-utils (for testing CAN Bus features with "canplayer" and "candump")
 

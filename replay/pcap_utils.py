@@ -30,6 +30,12 @@ BTPS = {
     b"\x07\xd9\x00\x00": "CPM",
     b"\x07\xe2\x00\x00": "VAM",
 }
+LENGTH_CAM_WITH_CERTIFICATE = 300
+LENGTH_DENM_WITH_CERTIFICATE = 600
+SECURITY_TAIL_WO_CERTIFICATE = 86
+SECURITY_TAIL = SECURITY_TAIL_WO_CERTIFICATE + 151  # 151 bytes for the certificate
+# TODO DENM have a headerInfo of 21 bytes instead of 11
+SECURITY_TAIL_DENM = SECURITY_TAIL + 10  # 10 bytes for the headerInfo
 
 # General facility constants
 TIME_SHIFT = 1072915200000
@@ -230,66 +236,53 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         # Take the rest of the packet (Facilities layer)
                         facilities = data[BTP_HIGH:]
                     else:
-                        # Packet with the security layer
-                        btp_idx = 0
+                        # Isolate ethe security tail and the rest of the packet
+                        if LENGTH_CAM_WITH_CERTIFICATE <= len(pkt) <= LENGTH_DENM_WITH_CERTIFICATE:
+                            tail_security = data[-SECURITY_TAIL:]
+                            data = data[:-SECURITY_TAIL]
+                        elif len(pkt) > LENGTH_DENM_WITH_CERTIFICATE:
+                            tail_security = data[-SECURITY_TAIL_DENM:]
+                            data = data[:-SECURITY_TAIL_DENM]
+                        else:
+                            tail_security = data[-SECURITY_TAIL_WO_CERTIFICATE:]
+                            data = data[:-SECURITY_TAIL_WO_CERTIFICATE]
+                        # Take the source MAC address from the Ethernet II
+                        source_addr = ether_part[ETH_SRC_ADDR:-2]
+                        timestamp_idx = 0
+                        payload_length = None
+                        found = False  # Put "found" to False
                         while True:
-                            # Search through the packet to find a match for the known BTPs (supported for CAM, CPM, VAM, DENM)
-                            if btp_idx + BTP_PAD > len(data):
+                            # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
+                            if timestamp_idx + SOURCE_ADDR_PAD > len(data):
                                 break
-                            # Take 4 bytes slice
-                            it = data[btp_idx:btp_idx+BTP_PAD]
-                            if it in BTPS.keys():
+                            # Take 6 bytes slice
+                            it = data[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
+                            if it == source_addr:
                                 found = True
+                                payload_idx = deepcopy(timestamp_idx)
+                                # We know that the Payload Length is exactly 6 bytes behind the Source MAC Address position
+                                payload_idx -= PAYLOAD_PAD
+                                # Read Payload Length (used after)
+                                payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
+                                # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
+                                timestamp_idx += SOURCE_ADDR_PAD
                                 break
                             else:
-                                btp_idx += 1
+                                timestamp_idx += 1
 
                         if found:
-                            # We found the BTP
-                            # Take the source MAC address from the Ethernet II
-                            source_addr = ether_part[ETH_SRC_ADDR:-2]
                             # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
-                            geonet = data[:btp_idx]
+                            btp_payload = data[-payload_length:]
+                            btp = btp_payload[:BTP_PAD]
+                            facilities = btp_payload[BTP_PAD:]
+                            geonet = data[:payload_length]
                             current_timestamp = get_timestamp_ms(purpose="GeoNet")
                             assert current_timestamp > 0, "Error in time calculation"
                             current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
-                            # Prepare variables to be filled in the next search
-                            timestamp_idx = 0
-                            payload_length = None
-                            found = False  # Put "found" to False again for another search
-                            while True:
-                                # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
-                                if timestamp_idx + SOURCE_ADDR_PAD > len(geonet):
-                                    break
-                                # Take 6 bytes slice
-                                it = geonet[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
-                                if it == source_addr:
-                                    found = True
-                                    payload_idx = deepcopy(timestamp_idx)
-                                    # We know that the Payload Length is exactly 6 bytes behind the Source MAC Address position
-                                    payload_idx -= PAYLOAD_PAD
-                                    # Read Payload Length (used after)
-                                    payload_length = int.from_bytes(geonet[payload_idx: payload_idx+2], byteorder="big")
-                                    # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
-                                    timestamp_idx += SOURCE_ADDR_PAD
-                                    break
-                                else:
-                                    timestamp_idx += 1
-
-                            if found:
-                                # If all the searches went well we can create the New GeoNet
-                                new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
-                                # Ad-hoc trick, the Payload Length always includes the BTP length, we are interested only in the Facilities
-                                payload_length -= BTP_PAD
-                                # Extract the BTP to know the port
-                                btp = data[btp_idx:btp_idx+BTP_PAD]
-                                port = int.from_bytes(btp[:2], byteorder="big")
-                                # Extract the rest of the packet (Facilities + Security Tail)
-                                rest_pkt = data[btp_idx + BTP_PAD:]
-                                # Take the Facilities
-                                facilities = rest_pkt[:payload_length]
-                                # Take the Security Tail
-                                tail_security = rest_pkt[payload_length:]
+                            # If all the searches went well we can create the New GeoNet
+                            new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
+                            # Extract the BTP to know the port
+                            port = int.from_bytes(btp[:2], byteorder="big")
 
                     if not new_geonet or not btp or not facilities or not port:
                         # From both cases (with and without security layer), we need some basic information
@@ -446,4 +439,4 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
 # write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
 
-# write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")
+write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")
