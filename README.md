@@ -149,9 +149,11 @@ python merge_traces/union.py --csv-files trace1.csv trace2.csv trace3.csv --outp
 Follow the instructions inside the script to select the desired options.
 
 ## Work-in-progress for the first release
-- [ ] Enable the reliable usage of baud rates higher than 115200
 - [ ] Enable V2X messages reproduction with updated security certificates
-- [ ] Include DENM and IVIM message parsing
+- [ ] Enable the reliable usage of baud rates higher than 115200
+- [-] Enable GUI for V2X messages received (done just for CAMs and CPMs, but not for VAMs and DENMs)
+- [X] Enable AMQP subsciption and publishing of V2X messages
+- [X] CAM, VAM, CPM, DENM parsing
 - [X] Enable the GUI reproduction of objects perceived from V2X messages
 - [X] Enable the GUI reproduction of diverse objects perceived through the CAN Bus
 - [X] Make the record script more robust to issues that may stop the recording of the trace, making it save anyway what has been captured until that moment
