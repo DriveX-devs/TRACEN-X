@@ -1,5 +1,7 @@
 import socket
 import time
+import math
+import threading
 from typing import Any
 import asn1tools as asn
 from scapy.all import *
@@ -19,23 +21,21 @@ BTP_PORT_HIGH = 2
 
 # Security packet constants
 ETH_SRC_ADDR = 6
-SECURITY_PAD = 7
 BTP_PAD = 4
 SOURCE_ADDR_PAD = 6
 TIMESTAMP_PAD = 4
-PAYLOAD_PAD = 6
+PAYLOAD_PAD_SHB = 6
+PAYLOAD_PAD_GEOSCOPED = 10
 BTPS = {
     b"\x07\xd2\x00\x00": "DENM",
     b"\x07\xd1\x00\x00": "CAM",
     b"\x07\xd9\x00\x00": "CPM",
     b"\x07\xe2\x00\x00": "VAM",
 }
-LENGTH_CAM_WITH_CERTIFICATE = 300
-LENGTH_DENM_WITH_CERTIFICATE = 600
-SECURITY_TAIL_WO_CERTIFICATE = 86
-SECURITY_TAIL = SECURITY_TAIL_WO_CERTIFICATE + 151  # 151 bytes for the certificate
-# TODO DENM have a headerInfo of 21 bytes instead of 11
-SECURITY_TAIL_DENM = SECURITY_TAIL + 10  # 10 bytes for the headerInfo
+SECURITY_TAIL = 66
+AFTER_TIMESTAMP_PAD_SHB = 20
+AFTER_TIMESTAMP_PAD_GEOSCOPED = 32
+HOP_PAD = 3
 
 # General facility constants
 TIME_SHIFT = 1072915200000
@@ -66,7 +66,7 @@ class AMQPSender(MessagingHandler):
     def on_start(self, event) -> None:
         try:
             conn = event.container.connect(f"{self.server}:{self.port}")
-            self.sender = event.container.create_sender(conn, self.topic)
+            self.sender = event.container.create_sender(conn, "topic://" + self.topic)
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
@@ -182,6 +182,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     startup_time = time.time() * 1e6
     try:
         for i, pkt in enumerate(pcap):
+            if len(pkt)<600:
+                continue
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
             if stop_event and stop_event.is_set():
@@ -236,21 +238,14 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         # Take the rest of the packet (Facilities layer)
                         facilities = data[BTP_HIGH:]
                     else:
-                        # Isolate ethe security tail and the rest of the packet
-                        if LENGTH_CAM_WITH_CERTIFICATE <= len(pkt) <= LENGTH_DENM_WITH_CERTIFICATE:
-                            tail_security = data[-SECURITY_TAIL:]
-                            data = data[:-SECURITY_TAIL]
-                        elif len(pkt) > LENGTH_DENM_WITH_CERTIFICATE:
-                            tail_security = data[-SECURITY_TAIL_DENM:]
-                            data = data[:-SECURITY_TAIL_DENM]
-                        else:
-                            tail_security = data[-SECURITY_TAIL_WO_CERTIFICATE:]
-                            data = data[:-SECURITY_TAIL_WO_CERTIFICATE]
-                        # Take the source MAC address from the Ethernet II
                         source_addr = ether_part[ETH_SRC_ADDR:-2]
                         timestamp_idx = 0
+                        shb = None
                         payload_length = None
                         found = False  # Put "found" to False
+                        hops = int.from_bytes(data[HOP_PAD:HOP_PAD + 1], byteorder="big")
+                        # Knowing the hops limit is useful to understand if the packet is using a GeoNet Header Type SHB or Geo-scoped
+                        shb = False if hops > 1 else True
                         while True:
                             # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
                             if timestamp_idx + SOURCE_ADDR_PAD > len(data):
@@ -259,9 +254,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             it = data[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
                             if it == source_addr:
                                 found = True
-                                payload_idx = deepcopy(timestamp_idx)
-                                # We know that the Payload Length is exactly 6 bytes behind the Source MAC Address position
-                                payload_idx -= PAYLOAD_PAD
+                                mac_addr_idx = deepcopy(timestamp_idx)
+                                payload_idx = mac_addr_idx - PAYLOAD_PAD_SHB if shb else mac_addr_idx - PAYLOAD_PAD_GEOSCOPED
                                 # Read Payload Length (used after)
                                 payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
                                 # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
@@ -272,10 +266,18 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                         if found:
                             # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
-                            btp_payload = data[-payload_length:]
-                            btp = btp_payload[:BTP_PAD]
-                            facilities = btp_payload[BTP_PAD:]
-                            geonet = data[:payload_length]
+                            tail_security = data[-SECURITY_TAIL:]
+                            if shb == True:
+                                # We are in presence of a packet which uses SHB, such as CAM, VAM, CPM
+                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB]
+                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD]
+                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD + payload_length]
+                            else:
+                                # We are in presence of a packet which uses GeoScoped, such as DENM
+                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED]
+                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD]
+                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD + payload_length]
+                            # Update the timestamp
                             current_timestamp = get_timestamp_ms(purpose="GeoNet")
                             assert current_timestamp > 0, "Error in time calculation"
                             current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
