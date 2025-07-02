@@ -1,5 +1,7 @@
 import socket
 import time
+import math
+import threading
 from typing import Any
 import asn1tools as asn
 from scapy.all import *
@@ -19,17 +21,21 @@ BTP_PORT_HIGH = 2
 
 # Security packet constants
 ETH_SRC_ADDR = 6
-SECURITY_PAD = 7
 BTP_PAD = 4
 SOURCE_ADDR_PAD = 6
 TIMESTAMP_PAD = 4
-PAYLOAD_PAD = 6
+PAYLOAD_PAD_SHB = 6
+PAYLOAD_PAD_GEOSCOPED = 10
 BTPS = {
     b"\x07\xd2\x00\x00": "DENM",
     b"\x07\xd1\x00\x00": "CAM",
     b"\x07\xd9\x00\x00": "CPM",
     b"\x07\xe2\x00\x00": "VAM",
 }
+SECURITY_TAIL = 66
+AFTER_TIMESTAMP_PAD_SHB = 20
+AFTER_TIMESTAMP_PAD_GEOSCOPED = 32
+HOP_PAD = 3
 
 # General facility constants
 TIME_SHIFT = 1072915200000
@@ -60,7 +66,7 @@ class AMQPSender(MessagingHandler):
     def on_start(self, event) -> None:
         try:
             conn = event.container.connect(f"{self.server}:{self.port}")
-            self.sender = event.container.create_sender(conn, self.topic)
+            self.sender = event.container.create_sender(conn, "topic://" + self.topic)
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
@@ -176,6 +182,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     startup_time = time.time() * 1e6
     try:
         for i, pkt in enumerate(pcap):
+            if len(pkt)<600:
+                continue
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
             if stop_event and stop_event.is_set():
@@ -230,66 +238,53 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         # Take the rest of the packet (Facilities layer)
                         facilities = data[BTP_HIGH:]
                     else:
-                        # Packet with the security layer
-                        btp_idx = 0
+                        source_addr = ether_part[ETH_SRC_ADDR:-2]
+                        timestamp_idx = 0
+                        shb = None
+                        payload_length = None
+                        found = False  # Put "found" to False
+                        hops = int.from_bytes(data[HOP_PAD:HOP_PAD + 1], byteorder="big")
+                        # Knowing the hops limit is useful to understand if the packet is using a GeoNet Header Type SHB or Geo-scoped
+                        shb = False if hops > 1 else True
                         while True:
-                            # Search through the packet to find a match for the known BTPs (supported for CAM, CPM, VAM, DENM)
-                            if btp_idx + BTP_PAD > len(data):
+                            # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
+                            if timestamp_idx + SOURCE_ADDR_PAD > len(data):
                                 break
-                            # Take 4 bytes slice
-                            it = data[btp_idx:btp_idx+BTP_PAD]
-                            if it in BTPS.keys():
+                            # Take 6 bytes slice
+                            it = data[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
+                            if it == source_addr:
                                 found = True
+                                mac_addr_idx = deepcopy(timestamp_idx)
+                                payload_idx = mac_addr_idx - PAYLOAD_PAD_SHB if shb else mac_addr_idx - PAYLOAD_PAD_GEOSCOPED
+                                # Read Payload Length (used after)
+                                payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
+                                # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
+                                timestamp_idx += SOURCE_ADDR_PAD
                                 break
                             else:
-                                btp_idx += 1
+                                timestamp_idx += 1
 
                         if found:
-                            # We found the BTP
-                            # Take the source MAC address from the Ethernet II
-                            source_addr = ether_part[ETH_SRC_ADDR:-2]
                             # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
-                            geonet = data[:btp_idx]
+                            tail_security = data[-SECURITY_TAIL:]
+                            if shb == True:
+                                # We are in presence of a packet which uses SHB, such as CAM, VAM, CPM
+                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB]
+                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD]
+                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD + payload_length]
+                            else:
+                                # We are in presence of a packet which uses GeoScoped, such as DENM
+                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED]
+                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD]
+                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD + payload_length]
+                            # Update the timestamp
                             current_timestamp = get_timestamp_ms(purpose="GeoNet")
                             assert current_timestamp > 0, "Error in time calculation"
                             current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
-                            # Prepare variables to be filled in the next search
-                            timestamp_idx = 0
-                            payload_length = None
-                            found = False  # Put "found" to False again for another search
-                            while True:
-                                # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
-                                if timestamp_idx + SOURCE_ADDR_PAD > len(geonet):
-                                    break
-                                # Take 6 bytes slice
-                                it = geonet[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
-                                if it == source_addr:
-                                    found = True
-                                    payload_idx = deepcopy(timestamp_idx)
-                                    # We know that the Payload Length is exactly 6 bytes behind the Source MAC Address position
-                                    payload_idx -= PAYLOAD_PAD
-                                    # Read Payload Length (used after)
-                                    payload_length = int.from_bytes(geonet[payload_idx: payload_idx+2], byteorder="big")
-                                    # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
-                                    timestamp_idx += SOURCE_ADDR_PAD
-                                    break
-                                else:
-                                    timestamp_idx += 1
-
-                            if found:
-                                # If all the searches went well we can create the New GeoNet
-                                new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
-                                # Ad-hoc trick, the Payload Length always includes the BTP length, we are interested only in the Facilities
-                                payload_length -= BTP_PAD
-                                # Extract the BTP to know the port
-                                btp = data[btp_idx:btp_idx+BTP_PAD]
-                                port = int.from_bytes(btp[:2], byteorder="big")
-                                # Extract the rest of the packet (Facilities + Security Tail)
-                                rest_pkt = data[btp_idx + BTP_PAD:]
-                                # Take the Facilities
-                                facilities = rest_pkt[:payload_length]
-                                # Take the Security Tail
-                                tail_security = rest_pkt[payload_length:]
+                            # If all the searches went well we can create the New GeoNet
+                            new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
+                            # Extract the BTP to know the port
+                            port = int.from_bytes(btp[:2], byteorder="big")
 
                     if not new_geonet or not btp or not facilities or not port:
                         # From both cases (with and without security layer), we need some basic information
