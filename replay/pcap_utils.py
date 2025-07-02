@@ -1,11 +1,9 @@
 import socket
 import time
-import math
 import threading
 from typing import Any
 import asn1tools as asn
 from scapy.all import *
-from copy import  deepcopy
 from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
@@ -22,10 +20,10 @@ BTP_PORT_HIGH = 2
 # Security packet constants
 ETH_SRC_ADDR = 6
 BTP_PAD = 4
-SOURCE_ADDR_PAD = 6
-TIMESTAMP_PAD = 4
-PAYLOAD_PAD_SHB = 6
-PAYLOAD_PAD_GEOSCOPED = 10
+FIRST_SEARCH_PAD = 4
+FIRST_SEARCH_SEQ = b'\x00\x40\x03\x80'
+SECOND_SEARCH_PAD = 2
+SECOND_SEARCH_SEQ = [b'\x20\x50', b'\x20\x40']
 BTPS = {
     b"\x07\xd2\x00\x00": "DENM",
     b"\x07\xd1\x00\x00": "CAM",
@@ -35,7 +33,6 @@ BTPS = {
 SECURITY_TAIL = 66
 AFTER_TIMESTAMP_PAD_SHB = 20
 AFTER_TIMESTAMP_PAD_GEOSCOPED = 32
-HOP_PAD = 3
 
 # General facility constants
 TIME_SHIFT = 1072915200000
@@ -127,7 +124,7 @@ def get_timestamp_ms(purpose: str) -> int:
             microseconds = 0
 
         # Compute total milliseconds
-        millis = math.floor((seconds * 1e6 + microseconds) / 1e3)
+        millis = int((seconds * 1e6 + microseconds) / 1e3)
 
         # Apply ITS epoch and ETSI wraparound
         return int((millis - TIME_SHIFT) % MODULO_WRAP) if purpose == "CPM" else int((millis - TIME_SHIFT) % TS_MAX1)
@@ -182,8 +179,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     startup_time = time.time() * 1e6
     try:
         for i, pkt in enumerate(pcap):
-            if len(pkt)<600:
-                continue
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
 
             if stop_event and stop_event.is_set():
@@ -240,29 +235,54 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                     else:
                         source_addr = ether_part[ETH_SRC_ADDR:-2]
                         timestamp_idx = 0
+                        payload_idx = 0
                         shb = None
                         payload_length = None
-                        found = False  # Put "found" to False
-                        hops = int.from_bytes(data[HOP_PAD:HOP_PAD + 1], byteorder="big")
-                        # Knowing the hops limit is useful to understand if the packet is using a GeoNet Header Type SHB or Geo-scoped
-                        shb = False if hops > 1 else True
+                        found_first = False
+                        found = False
                         while True:
-                            # Search through the packet to find a match for the repetition of the source MAC address (repeated in the GeoNet)
-                            if timestamp_idx + SOURCE_ADDR_PAD > len(data):
+                            if payload_idx + FIRST_SEARCH_PAD > len(data):
                                 break
-                            # Take 6 bytes slice
-                            it = data[timestamp_idx:timestamp_idx+SOURCE_ADDR_PAD]
-                            if it == source_addr:
-                                found = True
-                                mac_addr_idx = deepcopy(timestamp_idx)
-                                payload_idx = mac_addr_idx - PAYLOAD_PAD_SHB if shb else mac_addr_idx - PAYLOAD_PAD_GEOSCOPED
-                                # Read Payload Length (used after)
-                                payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
-                                # Update the Timestamp index after the Source MAC Address so that it is possible to insert the new timestamp
-                                timestamp_idx += SOURCE_ADDR_PAD
-                                break
+                            # Take bytes slice to search FIRST_SEARCH_SEQ
+                            it = data[payload_idx: payload_idx+FIRST_SEARCH_PAD]
+                            if it == FIRST_SEARCH_SEQ:
+                                payload_idx += FIRST_SEARCH_PAD
+                                while True:
+                                    if payload_idx + SECOND_SEARCH_PAD > len(data):
+                                        break
+                                    # Take bytes slice to search SECOND_SEARCH_SEQ
+                                    it = data[payload_idx: payload_idx+SECOND_SEARCH_PAD]
+                                    if it in SECOND_SEARCH_SEQ:
+                                        found_first = True
+                                        # Extract information whether the packet is using Single Hop Broadcast (SHB) or Geo-scoped
+                                        shb = True if it == SECOND_SEARCH_SEQ[0] else False
+                                        payload_idx += SECOND_SEARCH_PAD
+                                        payload_idx += 2
+                                        # Extract the payload length
+                                        payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
+                                        break
+                                    else:
+                                        payload_idx += 1
+                                found = True if found_first else False
+                                if found:
+                                    found = False
+                                    timestamp_idx = payload_idx + 2
+                                    while True:
+                                        if timestamp_idx + ETH_SRC_ADDR > len(data):
+                                            break
+                                        # Take bytes slice to search the MAC Address repetition
+                                        it = data[timestamp_idx: timestamp_idx + ETH_SRC_ADDR]
+                                        if it == source_addr:
+                                            found = True
+                                            # Found the timestamp position in the GeoNet
+                                            timestamp_idx += ETH_SRC_ADDR
+                                            break
+                                        else:
+                                            timestamp_idx += 1
+                                if found:
+                                    break
                             else:
-                                timestamp_idx += 1
+                                payload_idx += 1
 
                         if found:
                             # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
@@ -273,7 +293,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                 btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD]
                                 facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD + payload_length]
                             else:
-                                # We are in presence of a packet which uses GeoScoped, such as DENM
+                                # We are in presence of a packet which uses Geo-scoped, such as DENM
                                 geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED]
                                 btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD]
                                 facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD + payload_length]
