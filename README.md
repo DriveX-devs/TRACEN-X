@@ -151,7 +151,7 @@ Follow the instructions inside the script to select the desired options.
 ## Work-in-progress for the first release
 - [ ] Enable V2X messages reproduction with updated security certificates
 - [ ] Enable the reliable usage of baud rates higher than 115200
-- [-] Enable GUI for V2X messages received (done just for CAMs and CPMs, but not for VAMs and DENMs)
+- [ ] Enable GUI for V2X messages received (done just for CAMs and CPMs, but not for VAMs and DENMs)
 - [X] Enable AMQP subsciption and publishing of V2X messages
 - [X] CAM, VAM, CPM, DENM parsing
 - [X] Enable the GUI reproduction of objects perceived from V2X messages
