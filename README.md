@@ -42,6 +42,11 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
 - socat (for serial emulation)
 - [Optional] can-utils (for testing CAN Bus features with "canplayer" and "candump")
 
+### Usage of sudo
+The majority of functionalities could be used without sudo.
+However, in order to perform V2X message replay on a real network interface, sudo is required due to the need for writing to raw sockets.
+For consistency and to avoid unexpected permission issues, we conventionally run all commands with sudo.
+
 ### Python Packages
 - pyserial (for serial recording and reproducing)
 - pyproj (for GUI mode)
@@ -61,7 +66,7 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
     
 2. Upgrade pip and install Python development headers for the used version
     ```sh
-    python3 -m pip install --upgrade pip
+    sudo python3 -m pip install --upgrade pip
     sudo apt install python3.<version-used>-dev
     ```
     
@@ -72,17 +77,17 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
     
 4. Install the required Python packages:
    ```sh
-    pip install -r requirements
+    sudo pip install -r requirements
    ```
    
 5. [Optional] Install the required Python packages:
     ```sh
-    pip install pyserial
-    pip install cantools
-    pip install pyproj
-    pip install asn1tools
-    pip install scapy
-    pip install python-qpid-proton
+    sudo pip install pyserial
+    sudo pip install cantools
+    sudo pip install pyproj
+    sudo pip install asn1tools
+    sudo pip install scapy
+    sudo pip install python-qpid-proton
     ```
 
 6. Ensure `socat` is installed on your system:
@@ -98,7 +103,7 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
 8. Install the npm packages:
     ```sh
     cd replay/vehicle_visualizer
-    npm install
+    sudo npm install
     ```
 
 9. Prepare the virtual CAN Bus for the emulation:
@@ -116,16 +121,16 @@ The `merge_traces` script allows merging multiple CSV traces into a single one.
 
 The detailed usage of the scripts can be found by running the following commands:
 ```sh
-python3 record/record.py --help
-python3 replay/replay.py --help
-python3 merge_traces/union.py --help
+sudo python3 record/record.py --help
+sudo python3 replay/replay.py --help
+sudo python3 merge_traces/union.py --help
 ```
 
 ### Record
 
 Example of usage for the record script:
 ```sh
-python3 record/record.py --enable-serial --device=/dev/ttyACM0 --serial-filename=./data/outlog.json --baudrate=115200 --end-time=10 --enable-CAN --CAN-device=vcan0 --CAN-filename=./data/CANlog.json --CAN-db=./data/motohawk.db --enable-pcap --interface=wlan1 --pcap-filename=./data/pcap_output/trace2.pcapng
+sudo python3 record/record.py --enable-serial --device=/dev/ttyACM0 --serial-filename=./data/outlog.json --baudrate=115200 --end-time=10 --enable-CAN --CAN-device=vcan0 --CAN-filename=./data/CANlog.json --CAN-db=./data/motohawk.db --enable-pcap --interface=wlan1 --pcap-filename=./data/pcap_output/trace2.pcapng
 ```
 
 Follow the instructions inside the script to select the desired options.
@@ -134,14 +139,14 @@ Follow the instructions inside the script to select the desired options.
 
 Example of usage for the replay script:
 ```sh
-python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng
+sudo python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng
 ```
 
 ### Merge Traces
 
 Example of usage for the merge traces script:
 ```sh
-python merge_traces/union.py --csv-files trace1.csv trace2.csv trace3.csv --output merged.csv --file-reference trace1.csv
+sudo python merge_traces/union.py --csv-files trace1.csv trace2.csv trace3.csv --output merged.csv --file-reference trace1.csv
 ```
 
 Follow the instructions inside the script to select the desired options.
