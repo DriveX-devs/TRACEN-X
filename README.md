@@ -130,7 +130,7 @@ sudo python3 merge_traces/union.py --help
 
 Example of usage for the record script:
 ```sh
-sudo python3 record/record.py --enable-serial --device=/dev/ttyACM0 --serial-filename=./data/outlog.json --baudrate=115200 --end-time=10 --enable-CAN --CAN-device=vcan0 --CAN-filename=./data/CANlog.json --CAN-db=./data/motohawk.db --enable-pcap --interface=wlan1 --pcap-filename=./data/pcap_output/trace2.pcapng
+sudo python3 record/record.py --enable-serial --device /dev/ttyACM0 --serial-filename ./data/outlog.json --baudrate 115200 --end-time 10 --enable-CAN --CAN-device vcan0 --CAN-filename ./data/CANlog.json --CAN-db ./data/motohawk.db --enable-pcap --interface wlan1 --pcap-filename ./data/pcap_output/trace2.pcapng
 ```
 
 Follow the instructions inside the script to select the desired options.
@@ -139,7 +139,7 @@ Follow the instructions inside the script to select the desired options.
 
 Example of usage for the replay script:
 ```sh
-sudo python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface=wlan1 --update-datetime --new-pcap-file=new_pcap.pcapng
+sudo python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface wlan1 --update-datetime --new-pcap-file new_pcap.pcapng
 ```
 
 ### Merge Traces
