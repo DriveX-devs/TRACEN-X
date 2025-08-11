@@ -442,9 +442,9 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             try:
                 sock.send(new_pkt)
                 if enable_amqp:
-                    # Send the packet to the AMQP broker
+                    # Send the packet to the AMQP broker (excluding first 14 bytes of any Ethernet II "dummy" header)
                     properties = compute_properties()
-                    succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
+                    succ = amqp_sender.send_message(new_pkt[ETHER_LENGTH:], message_id=f"packet{i+1}", properties=properties)
                     if not succ:
                         print("ERROR on message sending to the AMQP broker!")
             except Exception as e:
