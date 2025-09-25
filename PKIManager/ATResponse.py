@@ -22,7 +22,8 @@ from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature, Prehashed
 
 
-from INIReader import INIReader
+from .INIReader import INIReader
+from .CRReader import CRRReader
 from dataclasses import dataclass
 
 
@@ -99,6 +100,7 @@ class IniAT:
     bitmapCAM: str = ""
     bitmapDENM: str = ""
     eaIDstring: str = ""
+    itsID: str = ""
     public_key_rfc: str = ""
     private_key_rfc1: str = ""
     private_key_rfc2: str = ""
@@ -150,12 +152,15 @@ class ATResponse:
         self.HMAC_TAG_LENGTH = 32
         self.CURVE = ec.SECP256R1()  # NIST P-256
 
+        self.path = os.path.abspath(os.path.dirname(__file__))
+
         self.dataResponse = None
         self.length = 0
 
         self.ephemeral = False
         self.m_ecKey = None
         self.m_EPHKey = None
+        self.m_aesKeys = {}
 
     @staticmethod
     def retrieveStringFromFile(file_name):
@@ -176,14 +181,17 @@ class ATResponse:
     
     @staticmethod
     def saveStringToFile(key: str, file_name: str):
-            try:
-                with open(file_name, "wb") as file_out:
-                    length = len(key)
-                    file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
-                    file_out.write(key.encode("utf-8"))  # Scrivi la stringa
-                    print("Pre Shared Key saved to binary file.")
-            except Exception as e:
-                print(f"Error opening file for writing: {e}")
+        try:
+            dir_path = os.path.dirname(file_name)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+            with open(file_name, "wb") as file_out:
+                length = len(key)
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
+                file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                print("Pre Shared Key saved to binary file.")
+        except Exception as e:
+            print(f"Error opening file for writing: {e}")
 
     def readFileContent(self, filename):
         try:
@@ -241,17 +249,23 @@ class ATResponse:
         decryptedMessage = aesccm.decrypt(nonce, ciphertext_with_tag, None)
         return decryptedMessage
     
-    def doDecryption(self, ciphertextWithTag: bytes, nonce: bytes) -> bytes:
+    def doDecryption(self, ciphertextWithTag: bytes, nonce: bytes, vehicle_id: int) -> bytes:
 
-        if not hasattr(self, 'm_aesKey') or not self.m_aesKey:
-            # Use the correct path for the pre-shared key file
-            self.m_aesKey = self.retrieveStringFromFile("/Users/giuseppe/Desktop/TRACEN-x/pskAT.bin")
-            
-        # Controllo se la chiave è stata recuperata correttamente
-        if self.m_aesKey is None:
-            raise ValueError("Failed to retrieve pre-shared key from file")
+        cached_key = self.m_aesKeys.get(vehicle_id)
+        if not cached_key:
+            key_path = os.path.join(
+                self.path,
+                'certificates',
+                'keys',
+                f'ITS_{vehicle_id}',
+                'pskAT.bin'
+            )
+            cached_key = self.retrieveStringFromFile(key_path)
+            if not cached_key:
+                raise ValueError("Failed to retrieve pre-shared key from file")
+            self.m_aesKeys[vehicle_id] = cached_key
 
-        psk = bytes.fromhex(self.m_aesKey)
+        psk = bytes.fromhex(cached_key)
 
         decrypted_message = self.decryptMessage(ciphertextWithTag, nonce, psk)
         
@@ -304,14 +318,12 @@ class ATResponse:
             return None
         return ec_key
     
-    def readIniFile(self, filename: str = "/Users/giuseppe/Desktop/TRACEN-x/PKIManager/PKI_info.ini") -> "IniAT":
-        """Python translation of ATManager::readIniFile().
-        Reads PKI_info.ini using INIReader and returns an IniAT with defaults of "UNKNOWN" like the C++ code.
-        Prints an error if the file can't be loaded (ParseError() < 0).
-        """
-        reader = INIReader(filename)
+    def readIniFile(self, vehicle_id: int) -> "IniAT":
+        """Load AT configuration together with vehicle specific credentials."""
+        ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
+        reader = INIReader(ini_path)
         if reader.ParseError() < 0:
-            print(f"[ERR] Can't load '{filename}'")
+            print(f"[ERR] Can't load '{ini_path}'")
 
         ini = IniAT(
             aaCert1=reader.Get("ATinfo", "AAcert1", "UNKNOWN"),
@@ -326,6 +338,19 @@ class ATResponse:
             private_key_rfc1=reader.Get("ATinfo", "private_key_rfc1", "UNKNOWN"),
             private_key_rfc2=reader.Get("ATinfo", "private_key_rfc2", "UNKNOWN"),
         )
+
+        credentials_path = os.path.join(self.path, 'certificates', 'credentials.json')
+        credentials = CRRReader(credentials_path, vehicle_id)
+        if credentials is None:
+            print(f"[ERR] Can't load credentials for vehicle '{vehicle_id}'")
+        else:
+            ini.itsID = credentials.get('itsID', "UNKNOWN")
+            ini.public_key_rfc = credentials.get('public_key_rfc', ini.public_key_rfc)
+            private_key_full = credentials.get('private_key_rfc', "")
+            if private_key_full:
+                ini.private_key_rfc1 = private_key_full
+                ini.private_key_rfc2 = ""
+
         return ini
 
     def loadECKeyFromRFC5480(self, private_key_rfc: str, public_key_rfc: str, password: bytes | None = None):
@@ -369,23 +394,24 @@ class ATResponse:
 
         return priv_key
     
-    def reconverECKeyPair(self, ephemeral: bool) -> GNpublicKey:
-        ini_path = '/Users/giuseppe/Desktop/TRACEN-x/PKIManager/PKI_info.ini'
+    def reconverECKeyPair(self, ephemeral: bool, vehicle_id: int, ini_data: IniAT | None = None) -> GNpublicKey:
         ec_key = None
         try:
             if ephemeral:
-                private_key_file = "./pkiReqRes/ephSKEY.pem"
-                public_key_file = "./pkiReqRes/ephPKEY.pem"
+                keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{vehicle_id}')
+                private_key_file = os.path.join(keys_folder, 'ephSKEY.pem')
+                public_key_file = os.path.join(keys_folder, 'ephPKEY.pem')
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
                 if ec_key is None:
                     return GNpublicKey()  # Empty instance
                 self.m_EPHecKey = ec_key
 
             else:
-                iniData = self.readIniFile()
+                if ini_data is None:
+                    ini_data = self.readIniFile(vehicle_id)
 
-                public_key_rfc = iniData.public_key_rfc or ""
-                private_key_rfc = (iniData.private_key_rfc1 or "") + (iniData.private_key_rfc2 or "")
+                public_key_rfc = ini_data.public_key_rfc or ""
+                private_key_rfc = (ini_data.private_key_rfc1 or "") + (ini_data.private_key_rfc2 or "")
                 ec_key = self.loadECKeyFromRFC5480(private_key_rfc, public_key_rfc)
                 
                 if ec_key is None:
@@ -413,8 +439,7 @@ class ATResponse:
             print(f"Error in reconverECKeyPair: {e}")
             return GNpublicKey()  # Empty instance
 
-    def signatureVerification(self, tbsData: bytes, rValue: GNecdsaNistP256, sValue: str, verifyKeyIndicator: GNecdsaNistP256) -> bool:
-        ini = self.readIniFile()
+    def signatureVerification(self, tbsData: bytes, rValue: GNecdsaNistP256, sValue: str, verifyKeyIndicator: GNecdsaNistP256, ini: IniAT) -> bool:
 
         # Selezione della chiave pubblica dell'EA: preferisci forme utilizzabili (compressed/uncompressed)
         EAPublicKey = None
@@ -474,13 +499,13 @@ class ATResponse:
             print("AT Signature is invalid")
             return False
     
-    def getATResponse(self):
+    def getATResponse(self, vehicle_id: int):
 
         asn_folder = os.path.join("data", "asn", "security")
         asn_files = glob.glob(os.path.join(asn_folder, "*.asn"))
         asn1_modules = asn1tools.compile_files(asn_files, 'oer')
 
-        ini = self.readIniFile()
+        ini = self.readIniFile(vehicle_id)
         binaryCert = bytes.fromhex(ini.aaCert1 + ini.aaCert2 + ini.aaCert3 + ini.aaCert4)
 
         certificate_hash = self.computeSHA256(binaryCert)
@@ -562,13 +587,20 @@ class ATResponse:
             newCert.signature_sSig = signcertData_decoded[1]['sSig']
         
         #  -------------------------------------------
-        self.readFileContent("/Users/giuseppe/Desktop/TRACEN-x/pkiReqRes/responseAT.bin")
+        response_path = os.path.join(
+            self.path,
+            'certificates',
+            'responses',
+            f'ITS_{vehicle_id}',
+            'responseAT.bin'
+        )
+        self.readFileContent(response_path)
         if self.dataResponse is None or self.length == 0:
             print("Error reading ATResponse.bin file")
             return None
         
         self.ephemeral = False
-        public_Key = self.reconverECKeyPair(self.ephemeral)
+        self.reconverECKeyPair(self.ephemeral, vehicle_id, ini)
         packetContent = self.dataResponse
 
         encPacket = cPacket()
@@ -594,7 +626,11 @@ class ATResponse:
                 encPacket.content.encrData.nonce = encDataDec['ciphertext'][1]['nonce']
 
         # Decrypt the message
-        encPacket.content.unsecuredData = self.doDecryption(encPacket.content.encrData.ciphertext,encPacket.content.encrData.nonce)
+        encPacket.content.unsecuredData = self.doDecryption(
+            encPacket.content.encrData.ciphertext,
+            encPacket.content.encrData.nonce,
+            vehicle_id
+        )
         if not encPacket.content.unsecuredData:
             print("[ERR] Error decrypting the message")
             return None  
@@ -638,7 +674,13 @@ class ATResponse:
                 sPack.content.signData.signature_sSig = signDec['signature'][1]['sSig']
             tbs = asn1_modules.encode('ToBeSignedData', tbsDecoded)
 
-            signValidation = self.signatureVerification(tbs,  sPack.content.signData.rSig, sPack.content.signData.signature_sSig, newCert.tbs.verifyKeyIndicator)
+            signValidation = self.signatureVerification(
+                tbs,
+                sPack.content.signData.rSig,
+                sPack.content.signData.signature_sSig,
+                newCert.tbs.verifyKeyIndicator,
+                ini
+            )
  
         if signValidation:
             etsiData = asn1_modules.decode('EtsiTs102941Data', sPack.content.signData.tbsdata.unsecuredData)
@@ -715,7 +757,30 @@ class ATResponse:
                 print('AT Bytes:', at)
 
                 # inserting the certificate in the database
-                
+                CPath = os.path.join(self.path, 'certificates', 'certificates.json')
+                cert_entry = {
+                    'itsID': ini.itsID,
+                    'certificate': at.hex(),
+                    'start': ATres.certificate.tbs.validityPeriod_start,
+                    'end': ATres.certificate.tbs.validityPeriod_start + ATres.certificate.tbs.validityPeriod_duration * 3600
+                }
+
+                try:
+                    if os.path.exists(CPath):
+                        with open(CPath, 'r') as f:
+                            existing_data = json.load(f)
+                    else:
+                        existing_data = {}
+                    vehicle_key = str(vehicle_id)
+                    vehicle_entry = existing_data.get(vehicle_key, {})
+                    vehicle_entry['AT'] = cert_entry
+                    existing_data[vehicle_key] = vehicle_entry
+                    with open(CPath, 'w') as f:
+                        json.dump(existing_data, f, indent=4)
+                    print(f"AT certificate data saved to {CPath}")
+                except Exception as e:
+                    print(f"Error saving AT certificate data to {CPath}: {e}")
+
                 return ATres.certificate
         else:
             print("Signature verification failed")
@@ -724,7 +789,7 @@ class ATResponse:
 # example of usage
 if __name__ == "__main__":
     at_response = ATResponse()
-    certificate = at_response.getATResponse()
+    certificate = at_response.getATResponse(0)
     if certificate:
         print("Extracted Certificate:")
         print(certificate)
