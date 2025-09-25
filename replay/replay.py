@@ -9,6 +9,7 @@ from can_utils import write_CAN
 from gui_utils import serial_gui
 from serial_utils import write_serial
 from pcap_utils import write_pcap
+from pcap_utils import count_certificates
 
 def signal_handler(sig, frame, stop_event):
     """
@@ -89,7 +90,8 @@ def main():
     args.add_argument("--amqp-topic", type=str, help="The Topic of the AMQP server. Default is tracenx", default="tracenx")
 
     args = args.parse_args()
-
+    # TODO: if enable pcap, read the pcap file and count the certificates and ask
+    
     serial = args.enable_serial
     serial_filename = args.serial_filename
     server_device = args.server_device
@@ -214,6 +216,11 @@ def main():
 
     if enable_pcap:
         assert os.path.exists(pcap_filename)
+        if update_datetime:
+            # count the number of needed certificates
+            certificates, _ = count_certificates(pcap_filename, start_time, end_time)
+
+        # ask certificates    
         pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic))
         pcap_process.start()
 

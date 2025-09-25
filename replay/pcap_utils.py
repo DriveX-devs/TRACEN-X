@@ -7,6 +7,10 @@ from scapy.all import *
 from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
+import glob
+# TODO: How many certificates do we need?
+# TODO: How many certificates have we?
+# TODO: asking the difference
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
@@ -46,10 +50,13 @@ cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
 denm_asn = "./data/asn/DENM-all-old.asn"
+security_folder = "./data/asn/security/"
 CPM = asn.compile_files(cpm_asn, "uper")
 VAM = asn.compile_files(vam_asn, "uper")
 CAM = asn.compile_files(cam_asn, "uper")
 DENM = asn.compile_files(denm_asn, "uper")
+asn_files = glob.glob(os.path.join(security_folder, "*.asn"))
+SECURITY = asn.compile_files(asn_files, 'oer')
 
 class AMQPSender(MessagingHandler):
     def __init__(self, server, port, topic):
@@ -442,9 +449,9 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             try:
                 sock.send(new_pkt)
                 if enable_amqp:
-                    # Send the packet to the AMQP broker (excluding first 14 bytes of any Ethernet II "dummy" header)
+                    # Send the packet to the AMQP broker
                     properties = compute_properties()
-                    succ = amqp_sender.send_message(new_pkt[ETHER_LENGTH:], message_id=f"packet{i+1}", properties=properties)
+                    succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
                     if not succ:
                         print("ERROR on message sending to the AMQP broker!")
             except Exception as e:
@@ -458,7 +465,45 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             amqp_sender.stop()
             amqp_thread.join()
 
+def count_certificates(pcap_path, start_time= None, end_time= None):
+    # check if pcap_path exists
+    if not os.path.exists(pcap_path):
+        print(f"Pcap file {pcap_path} does not exist.")
+        return
+    
+    packets = rdpcap(pcap_path)
+    bts = packets[0].time  # epoch time in seconds
+    
+    start = bts + start_time if start_time else bts
+    end = bts + end_time if end_time else None
 
-# write_pcap(input_filename="/home/diego/TRACEN-X/VAMsTX_231219_161928.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True)
+    HEADER_LENGTH = 14
+    TAIL_LENGTH = 66
+    SEQUENCE = b'\x81\x01\x01\x80\x03\x00\x80'
 
-# write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="enp0s31f6", start_time=None, end_time=None, update_datetime=True, new_pcap="/mnt/xtra/TRACEN-X/new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")
+    digests = set()
+    count = 0
+    for pkt in packets:
+        pkt_time = pkt.time
+        if pkt_time < start:
+            continue
+        if end and pkt_time > end:
+            break
+        data = raw(pkt)[HEADER_LENGTH:-TAIL_LENGTH]  # dati tra header e coda
+        security = False if data[:1] == b'\x11' else True  # controlla se il pacchetto è secured
+        if not security:
+            continue  # salta i pacchetti non secured
+        if SEQUENCE in data:
+            count += 1
+            continue
+        digest = raw(pkt)[-74:-66] 
+        digests.add(digest.hex())
+
+    return len(digests)
+
+def ask_certificates(num_certs):
+    pass
+
+#write_pcap(input_filename="/Users/giuseppe/Desktop/TRACEN-x/cattura_MIS_80211p.pcapng", interface="en0", start_time=0, end_time=60, update_datetime=False, new_pcap="new_pcap.pcap")
+
+#write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="en0", start_time=None, end_time=60, update_datetime=True, new_pcap="new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")

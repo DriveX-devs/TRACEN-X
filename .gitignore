@@ -4,3 +4,4 @@ node_modules/
 *.Identifier
 *.attrs
 .idea/
+PKIManager/certificates/*

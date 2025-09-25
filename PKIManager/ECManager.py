@@ -1,0 +1,972 @@
+import os
+import requests
+import hashlib
+import asn1tools
+import traceback
+import sys
+import time
+import glob
+
+from dataclasses import dataclass, field
+from typing import List
+from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+from cryptography.hazmat.backends import default_backend
+# ASN.1/OER: serve lo schema ASN.1 originale per generare i binding
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_public_key, load_der_public_key,
+    load_pem_private_key, load_der_private_key,
+    Encoding, PublicFormat, PrivateFormat, NoEncryption
+)
+
+from cryptography.exceptions import InvalidKey
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, Prehashed
+
+
+from .INIReader import INIReader
+from .CRReader import CRRReader
+from .ECResponse import ECResponse
+from dataclasses import dataclass
+
+@dataclass
+class IniEC:
+    eaCert1: str = "UNKNOWN"
+    eaCert2: str = "UNKNOWN"
+    eaCert3: str = "UNKNOWN"
+    pk_rfc: str = "UNKNOWN"
+    sk_rfc: str = "UNKNOWN"
+    itsID: str = "UNKNOWN"
+    recipientID: str = "UNKNOWN"
+    bitmapSspEA: str = "UNKNOWN"
+
+
+# Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
+# la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
+@dataclass
+class GNpublicKey:
+    """
+    Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
+    la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
+    - x_only: stringa esadecimale (32 byte) dell'ascissa X
+    - prefix_type: 2 se y è pari (0x02), 3 se y è dispari (0x03)
+    """
+    pk: bytes = b""
+    prefix: str = ""  # 2 (y pari) oppure 3 (y dispari)
+
+@dataclass
+class GNpsidSsp:
+    psid: int
+    bitmapSsp: str
+
+@dataclass
+class GNecdsaNistP256:
+    p256_x_only: bytes = b""
+    p256_fill: bytes = b""
+    p256_compressed_y_0: bytes = b""
+    p256_compressed_y_1: bytes = b""
+    p256_uncompressed_x: bytes = b""
+    p256_uncompressed_y: bytes = b""
+
+@dataclass
+class GNtbsCertDC:
+    id: int = 0
+    name: str = ""
+    cracaId: str = ""
+    crlSeries: int = 0
+    validityPeriod_start: int = 0
+    validityPeriod_duration: int = 0
+    appPermissions: List[GNpsidSsp] = field(default_factory=list)
+    symAlgEnc: int = 0
+    encPublicKey: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
+    verifyKeyIndicator: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
+
+@dataclass
+class GNcertificateDC:
+    version: int = 0
+    type: int = 0
+    issuer: str = ""
+    tbs: GNtbsCertDC = field(default_factory=GNtbsCertDC)
+    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
+    signature_sSig: str = ""
+
+@dataclass
+class GNsignMaterial:
+    r: bytes = b""
+    s: bytes = b""
+
+@dataclass
+class EncData:
+    ciphertextWithTag: bytes = b""
+    encryptedKey: bytes = b""
+    ephemeralPublicKey: bytes = b""
+    x_value: bytes = b""
+    y_value: bytes = b""
+    eciesTag: bytes = b""
+    nonce: bytes = b""
+
+class ECManager:
+    """ Request of certificates """
+    def __init__(self):
+        self.ephemeral = False                # Flag per chiave effimera
+        self.m_ecKey = None                   # Chiave EC principale
+        self.m_EPHecKey = None                # Chiave EC effimera
+        self.request_result = ""              # Buffer per la richiesta generata
+        self.signedData_result = ""           # Buffer per i dati firmati
+        self.encode_result = ""               # Buffer per i dati codificati
+        # ETSI/IEEE 1609.2 encrypted container expects protocolVersion=3 (EA rejects =1)
+        self.m_protocolversion = 3            # Versione protocollo
+        self.m_version = 3                    # Versione dati
+        self.m_recipientID = "D41845A1F71C356A" # ID destinatario (8 byte)
+        self.m_hashId = "sha256"              # Algoritmo di hash (SHA256)
+        self.m_psid = 623                     # PSID (identificatore servizio)
+        self.m_itsID = "4472697665580108"     # ITS ID (identificatore veicolo/dispositivo)
+        self.m_certFormat = 1                 # Formato certificato
+        self.m_hours = 168                    # Durata in ore (7 giorni)
+        self.m_bitmapSspEA = "01C0"           # Bitmap SSP per EA
+
+        self.NONCE_LENGTH = 12
+        self.AES_KEY_LENGTH = 16 # AES-128
+        self.AES_CCM_TAG_LENGTH = 16
+        self.CURVE = ec.SECP256R1()           # Curva P-256
+        
+        self.path = os.path.abspath(os.path.dirname(__file__))
+
+
+    def readIniFile(self, id = 0) -> "IniEC":
+        """Python translation of C++ ECManager::readIniFile().
+        Reads PKI_info.ini using INIReader and returns an IniEC with defaults of "UNKNOWN" like the C++ code.
+        - Mirrors case-insensitive lookups
+        - Prints an error if the file can't be loaded (ParseError() < 0)
+        """
+        ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
+        credentials = os.path.join(self.path, 'certificates', 'credentials.json')
+        
+        reader = INIReader(ini_path)
+        if reader.ParseError() < 0:
+            print(f"[ERR] Can't load '{ini_path}'", file=sys.stderr)
+            return None
+        credentials = CRRReader(credentials, id)
+        if credentials is None:
+            print(f"[ERR] Can't load credentials from '{credentials}'", file=sys.stderr)
+            return None
+
+        ini = IniEC(
+            eaCert1=reader.Get("ECinfo", "eaCert1", "UNKNOWN"),
+            eaCert2=reader.Get("ECinfo", "eaCert2", "UNKNOWN"),
+            eaCert3=reader.Get("ECinfo", "eaCert3", "UNKNOWN"),
+            pk_rfc= credentials.get("public_key_rfc", "UNKNOWN"),
+            sk_rfc=credentials.get("private_key_rfc", "UNKNOWN"),
+            itsID=credentials.get("itsID", "UNKNOWN"),
+            recipientID=reader.Get("ECinfo", "recipientID", "UNKNOWN"),
+            bitmapSspEA=reader.Get("ECinfo", "bitmapEA", "UNKNOWN"),
+        )
+        return ini
+
+    @staticmethod
+    def loadCompressedPublicKey(compressed_key: bytes, compression: int):
+        
+        if len(compressed_key) != 32:
+            print("Key must be 32 bytes long")
+            return None
+        # Prefisso: 0x02 (y pari) o 0x03 (y dispari)
+        if compression == 2:
+            pk_data = b'\x02'
+        elif compression == 3:
+            pk_data = b'\x03'
+        else:
+            print("Compression must be 2 or 3")
+            return None
+
+        pk_data = pk_data + compressed_key
+        if len(pk_data) != 33:
+            print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
+            return None
+        # Carica la chiave pubblica ECC da bytes compressi
+        try:
+            curve = ec.SECP256R1() 
+            evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(curve, pk_data)            
+            return evp_pkey
+        
+        except Exception as e:
+            print(f"Errore nella conversione della chiave pubblica compressa: {e}")
+            return None
+
+    @staticmethod
+    def computeSHA256(data: bytes) -> bytes:
+        sha256 = hashlib.sha256()
+        sha256.update(data)
+        return sha256.digest()
+
+    @staticmethod
+    def deriveKeyWithKDF2(z: bytes, otherinfo: bytes | None, out_len: int) -> bytes:
+
+        otherinfo = otherinfo or b""
+        out = b""
+        counter = 1
+        while len(out) < out_len:
+            c = counter.to_bytes(4, "big")
+            out += hashlib.sha256(z + c + otherinfo).digest()
+            counter += 1
+        return out[:out_len]
+    
+    @staticmethod
+    def retrieveStringFromFile(file_name):
+        key = ""
+        try:
+            with open(file_name, "rb") as file_in:
+                length_bytes = file_in.read(8)  # size_t is typically 8 bytes
+                if len(length_bytes) < 8:
+                    print("Error reading length from file.")
+                    return key
+                length = int.from_bytes(length_bytes, byteorder="little")
+                key_bytes = file_in.read(length)
+                key = key_bytes.decode("utf-8")
+                print(f"Pre Shared Key retrieved: {key}")
+        except Exception as e:
+            print(f"Error opening file for reading: {e}")
+        return key        
+    
+    @staticmethod
+    def saveStringToFile(key: str, file_name: str):
+        try:
+            # Ensure the directory exists before writing the file
+            dir_path = os.path.dirname(file_name)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+            with open(file_name, "wb") as file_out:
+                length = len(key)
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
+                file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                print("Pre Shared Key saved to binary file.")
+        except Exception as e:
+            print(f"Error opening file for writing: {e}")
+    
+    def encryptMessage(self, plaintext: bytes, receiverPublicKey: ec.EllipticCurvePublicKey, p1: bytes | None = None, id: int | None = None):
+        
+        filePath = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}', "pskEC.bin")
+        # 1) Generate random AES key and nonce
+        aesKey = os.urandom(self.AES_KEY_LENGTH) # AES-128, 128 bit key
+        nonce = os.urandom(self.NONCE_LENGTH) # 12 byte nonce for AES-CCM
+        
+        # Print and save the AES key (matching C++ behavior)
+        aes_key_hex = ''.join(f'{byte:02x}' for byte in aesKey)
+        print(f"[INFO] Shared key: {aes_key_hex}")
+
+        self.saveStringToFile(aes_key_hex, filePath)
+
+        # 2) Encrypt with AES-128-CCM (using aes_key and nonce)
+        aead = AESCCM(aesKey, tag_length=self.AES_CCM_TAG_LENGTH)
+        ct_and_tag = aead.encrypt(nonce, plaintext, None)
+        ciphertext = ct_and_tag[:-self.AES_CCM_TAG_LENGTH]
+        aesCcmTag = ct_and_tag[-self.AES_CCM_TAG_LENGTH:]
+        
+        # 3) Validate receiver's public key and generate ephemeral key for ECDH
+        if not isinstance(receiverPublicKey, ec.EllipticCurvePublicKey):
+            raise InvalidKey("La chiave pubblica del destinatario non è EC o non è valida.")
+        # generate ephemeral key
+        ephemeralKey = ec.generate_private_key(self.CURVE)
+        
+        sharedSecret = ephemeralKey.exchange(ec.ECDH(), receiverPublicKey)  # ECDH
+        # 4) KDF2(SHA-256) → 48 byte: ke (16) || km (32)
+        derivedKey = self.deriveKeyWithKDF2(sharedSecret, p1, 48)
+        ke, km = derivedKey[:16], derivedKey[16:]
+
+        # 5) "Encrypt" the AES key with XOR using ke (ECIES style key encapsulation)
+        encryptedKey = bytes(a ^ b for a, b in zip(aesKey, ke))
+
+        # 6) HMAC-SHA256(encrypted_key) with km, truncated to 16 bytes
+        h = hmac.HMAC(km, hashes.SHA256())
+        h.update(encryptedKey)
+        full_tag = h.finalize()
+        ecies_tag = full_tag[:16]
+
+        # 7) Export ephemeral public key in X9.62 uncompressed format (like i2o_ECPublicKey)
+        eph_pub_bytes = ephemeralKey.public_key().public_bytes(
+            Encoding.X962, PublicFormat.UncompressedPoint
+        )
+
+        return {
+            "ciphertext": ciphertext,
+            "encrypted_key": encryptedKey,
+            "ephemeral_public_key": eph_pub_bytes,
+            "ecies_tag": ecies_tag,
+            "nonce": nonce,
+            "aesCcmTag": aesCcmTag,
+        }
+    # TODO
+    def doEncryption(self, message: bytes, encPkEA: GNecdsaNistP256, p1, id: int):
+
+        # Extract and prepare the public key from certificate data
+        compression = 0
+        publicKeyEA = b""
+        
+        if encPkEA.p256_x_only:
+            publicKeyEA = encPkEA.p256_x_only
+        elif encPkEA.p256_compressed_y_0:
+            publicKeyEA = encPkEA.p256_compressed_y_0
+            compression = 2
+        elif encPkEA.p256_compressed_y_1:
+            publicKeyEA = encPkEA.p256_compressed_y_1
+            compression = 3
+        
+        # Load the receiver's public key
+        receiver_pub_key = self.loadCompressedPublicKey(publicKeyEA, compression)
+        if receiver_pub_key is None:
+            print("Failed to load the public key!")
+            return None
+        
+        # Use encryptMessage to perform the encryption
+        encryption_result = self.encryptMessage(message, receiver_pub_key, p1, id)
+        
+        # Convert the result to EncData
+        return EncData(
+            ciphertextWithTag=encryption_result["ciphertext"] + encryption_result["aesCcmTag"],
+            encryptedKey=encryption_result["encrypted_key"],
+            ephemeralPublicKey=encryption_result["ephemeral_public_key"],
+            x_value=encryption_result["ephemeral_public_key"][1:33],  # Extract x (skip the 0x04 prefix)
+            y_value=encryption_result["ephemeral_public_key"][33:],   # Extract y
+            eciesTag=encryption_result["ecies_tag"],
+            nonce=encryption_result["nonce"]
+        )
+
+    def loadECKeyFromFile(self, private_key_file: str, public_key_file: str, password: bytes | None = None):
+        try:
+            with open(private_key_file, 'rb') as f:
+                priv_file = f.read()
+        except Exception as e:
+            print("Error opening file to load private key", file=sys.stderr)
+            self.print_error(e)
+            return None
+        ec_key = None
+        try:
+            ec_key = load_pem_private_key(priv_file, password=password)
+        except Exception as e:
+            print("Error reading private key from file", file=sys.stderr)
+            self.print_error(e)
+            return None
+        if not isinstance(ec_key, ec.EllipticCurvePrivateKey):
+            print("Loaded private key is not an EC key", file=sys.stderr)
+            return None
+        try:
+            with open(public_key_file, 'rb') as f:
+                pub_bytes = f.read()
+        except Exception as e:
+            print("Error opening file to load public key", file=sys.stderr)
+            self.print_error(e)
+            return None
+        try:
+            pub_key = load_pem_public_key(pub_bytes)
+        except Exception as e:
+            print("Error reading public key from file", file=sys.stderr)
+            self.print_error(e)
+            return None
+        if not isinstance(pub_key, ec.EllipticCurvePublicKey):
+            print("Loaded public key is not an EC key", file=sys.stderr)
+            return None
+
+        if not isinstance(ec_key.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
+            print("EC curve mismatch or unsupported curve", file=sys.stderr)
+            return None
+        
+        priv_pub_numbers = ec_key.public_key().public_numbers()
+        loaded_pub_numbers = pub_key.public_numbers()
+        if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
+            print("Public key does not match the private key", file=sys.stderr)
+            return None
+        return ec_key
+
+    def loadECKeyFromRFC5480(self, private_key_rfc: str, public_key_rfc: str, password: bytes | None = None):
+        try:
+            priv_der = bytes.fromhex(private_key_rfc)
+        except Exception as e:
+            print("Error parsing private key hex string to DER", file=sys.stderr)
+            self.print_error(e)
+            return None
+        try:
+            pub_der = bytes.fromhex(public_key_rfc)
+        except Exception as e:
+            print("Error parsing public key hex string to DER", file=sys.stderr)
+            self.print_error(e)
+            return None
+        try:
+            pkey = load_der_private_key(priv_der, password=password)
+        except Exception as e:
+            print("Error loading private key from PKCS#8 DER", file=sys.stderr)
+            self.print_error(e)
+            return None
+        if not isinstance(pkey, ec.EllipticCurvePrivateKey):
+            print("Loaded private key is not an EC key", file=sys.stderr)
+            return None
+        try:
+            pub_key = load_der_public_key(pub_der)
+        except Exception as e:
+            print("Error loading public key from RFC 5480 DER", file=sys.stderr)
+            self.print_error(e)
+            return None
+
+        if not isinstance(pub_key, ec.EllipticCurvePublicKey):
+            print("Loaded public key is not an EC key", file=sys.stderr)
+            return None
+
+        # --- Step 4: verifica la curva (tipicamente P-256)
+        if not isinstance(pkey.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
+            print("EC curve mismatch or unsupported curve", file=sys.stderr)
+            return None
+
+        # --- Step 5: verifica che la pubblica corrisponda alla privata
+        priv_pub_numbers = pkey.public_key().public_numbers()
+        loaded_pub_numbers = pub_key.public_numbers()
+        if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
+            print("Public key does not match the private key", file=sys.stderr)
+            return None
+
+        # Tutto ok: restituiamo la chiave privata (la sua parte pubblica è già consistente)
+        return pkey
+
+
+    def recoverECKeyPair(self, ephemeral: bool, id: int | None = None) -> "GNpublicKey":
+
+        public_key = GNpublicKey()
+        try:
+            if ephemeral:
+                keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}')
+
+                private_key_file = os.path.join(keys_folder,"ephSKEY.pem")
+                public_key_file = os.path.join(keys_folder,"ephPKEY.pem")
+                
+                ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
+                if ec_key is None:
+                    return public_key
+                self.m_EPHecKey = ec_key
+            else:
+                crPath = os.path.join(self.path, 'certificates', 'credentials.json')
+                credentials = CRRReader(crPath, id)
+                public_key_rfc = credentials.get("public_key_rfc", "UNKNOWN")
+                private_key_rfc = credentials.get("private_key_rfc", "UNKNOWN")
+
+                if (not public_key_rfc) or (not private_key_rfc) or \
+                   ("UNKNOWN" in public_key_rfc) or ("UNKNOWN" in private_key_rfc):
+                    print("[ERR] Missing RFC5480 key material in PKI_info.ini")
+                    return public_key
+                
+                ec_key = self.loadECKeyFromRFC5480(private_key_rfc, public_key_rfc)
+                if ec_key is None:
+                    return public_key
+                # Memorizza come chiave principale
+                self.m_ecKey = ec_key
+
+            # Estrae la parte pubblica e determina il prefisso (parità di y)
+            pub_numbers = ec_key.public_key().public_numbers()
+             
+            x_bytes = pub_numbers.x.to_bytes(32, "big")
+            y_is_even = (pub_numbers.y % 2) == 0
+            prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'  # 0x02 (y pari) oppure 0x03 (y dispari)
+
+            # Estrae la parte pubblica in formato compresso
+            pub_key = ec_key.public_key()
+            
+            # Ottieni la chiave compressa usando cryptography
+            compressed_point = pub_key.public_bytes(
+                Encoding.X962, 
+                PublicFormat.CompressedPoint
+            )
+            
+            # Il primo byte è il prefisso (0x02 o 0x03), i successivi 32 sono la coordinata x
+            prefix_byte = compressed_point[0]
+            x_bytes = compressed_point[1:33]
+            
+            prefix_type = 'compressed_y_0' if prefix_byte == 0x02 else 'compressed_y_1'
+
+            public_key.pk = x_bytes
+            public_key.prefix = prefix_type
+            return public_key
+        except Exception as e:
+            print("Error recovering EC key pair", file=sys.stderr)
+            return public_key
+
+    def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> dict | None:
+
+        try:
+            # Controlli di input
+            if not isinstance(hash, (bytes, bytearray)):
+                raise TypeError("hash_bytes deve essere bytes")
+            if len(hash) != 32:
+                raise ValueError("SHA-256 digest atteso: 32 byte")
+            
+            signature = ec_private_key.sign(hash,ec.ECDSA(Prehashed(hashes.SHA256())))
+            return signature
+        except Exception as e:
+            print("Error signing hash", file=sys.stderr)
+    
+    def signatureCreation(self, tbsData: bytes, ephemeral: bool) -> dict | None:
+            
+        try:
+            signMaterial = GNsignMaterial()
+            signIdentifierSelf = b''
+
+            tbsData_hash = self.computeSHA256(tbsData)
+            signIDself_hash = self.computeSHA256(signIdentifierSelf)
+
+            concatenatedHashes = tbsData_hash + signIDself_hash
+            final_hash = self.computeSHA256(concatenatedHashes)
+
+            if ephemeral:
+                if self.m_EPHecKey is None:
+                    print("Ephemeral EC key not loaded", file=sys.stderr)
+                    return None
+                ec_key = self.m_EPHecKey
+            else:
+                if self.m_ecKey is None:
+                    print("Main EC key not loaded", file=sys.stderr)
+                    return None
+                ec_key = self.m_ecKey
+            
+            signature = self.signHash(final_hash, ec_key)
+            r_int, s_int = decode_dss_signature(signature)
+            
+            r = r_int.to_bytes(32, byteorder='big')
+            s = s_int.to_bytes(32, byteorder='big')
+            signMaterial.r = r
+            signMaterial.s = s
+
+            return signMaterial
+        except Exception as e:
+            print("Error signing hash", file=sys.stderr)
+            self.print_error(e)
+            return None
+
+    @staticmethod
+    def getCurrentTimestamp() -> int:
+        # microsecondi dall'epoch UNIX corrente
+        microseconds_since_epoch = time.time_ns() // 1000
+
+        seconds_per_year = 365 * 24 * 60 * 60
+        leap_seconds = 8 * 24 * 60 * 60
+        epoch_difference_seconds = (34 * seconds_per_year) + leap_seconds
+        epoch_difference = epoch_difference_seconds * 1_000_000
+
+        return (microseconds_since_epoch - epoch_difference)
+
+    @staticmethod
+    def getCurrentTimestamp32() -> int:
+
+        seconds_since_epoch = int(time.time())
+
+        # Costanti come nel C++
+        seconds_per_year = 365 * 24 * 60 * 60
+        leap_seconds = 8 * 24 * 60 * 60
+        epoch_difference_seconds = (34 * seconds_per_year) + leap_seconds
+
+        tai_seconds_since_2004 = seconds_since_epoch - epoch_difference_seconds
+
+        # Emula il cast a uint32_t del C++ (wrap modulo 2^32)
+        return tai_seconds_since_2004 & 0xFFFFFFFF
+
+    def regeneratePEM(self, id) -> None:
+        keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}')
+
+        priv_path = os.path.join(keys_folder,"ephSKEY.pem")
+        pub_path = os.path.join(keys_folder,"ephPKEY.pem")
+        try:
+            # Create output directory if missing
+            priv_dir = os.path.dirname(priv_path) or "."
+            os.makedirs(priv_dir, exist_ok=True)
+            # Generate key pair on NID_X9_62_prime256v1 (aka SECP256R1)
+            try:
+                ec_key = ec.generate_private_key(self.CURVE)
+            except Exception as e:
+                print("Error creating EC_KEY object", file=sys.stderr)
+                self.print_error(e)
+                return
+
+            try:
+                priv_pem = ec_key.private_bytes(
+                    Encoding.PEM,
+                    PrivateFormat.TraditionalOpenSSL,
+                    NoEncryption(),
+                )
+            except Exception as e:
+                print("Error generating EC key pair", file=sys.stderr)
+                return
+            # Write private key
+            try:
+                with open(priv_path, "wb") as f:
+                    f.write(priv_pem)
+            except Exception as e:
+                print("Error opening file for writing private key", file=sys.stderr)
+                return
+            # Serialize public key in SubjectPublicKeyInfo PEM (matches PEM_write_EC_PUBKEY)
+            try:
+                pub_pem = ec_key.public_key().public_bytes(
+                    Encoding.PEM,
+                    PublicFormat.SubjectPublicKeyInfo,
+                )
+            except Exception as e:
+                print("Error writing public key to PEM file", file=sys.stderr)
+                return
+            # Write public key
+            try:
+                with open(pub_path, "wb") as f:
+                    f.write(pub_pem)
+            except Exception as e:
+                print("Error opening file for writing public key", file=sys.stderr)
+                return
+            print("Key pair generated and saved to ephSKEY.pem and ephPKEY.pem")
+        except Exception as e:
+            print("Error generating EC key pair", file=sys.stderr)
+            return
+
+
+    def createRequest(self,id):
+        
+        ini = self.readIniFile(id)
+        
+        EAcertificate = ini.eaCert1 + ini.eaCert2 + ini.eaCert3
+        binaryCert = bytes.fromhex(EAcertificate)
+
+        # TODO trovare un posto migliore per caricare i certificati ASN.1
+        asn_folder = os.path.join("data", "asn", "security")
+        asn_files = glob.glob(os.path.join(asn_folder, "*.asn"))
+        if not asn_files:
+            print(f"[ERR] No ASN.1 file found in {asn_folder}")
+            return None
+        asn1_modules = asn1tools.compile_files(asn_files, 'oer')
+
+        certificate_hash = self.computeSHA256(binaryCert)
+        certContent = binaryCert
+        certData_decoded = asn1_modules.decode('CertificateBase', certContent)
+
+        new_cert = GNcertificateDC()
+        new_cert.version = certData_decoded['version']
+        new_cert.type = certData_decoded['type']
+        new_cert.issuer = certData_decoded['issuer'][1]
+        
+        id_present = certData_decoded['toBeSigned']['id'][0]
+        if id_present == 'none':
+            new_cert.tbs.id = 0
+        elif id_present == 'name':
+            new_cert.tbs.name = certData_decoded['toBeSigned']['id'][1]
+
+        new_cert.tbs.cracaId = certData_decoded['toBeSigned']['cracaId']
+        new_cert.tbs.crlSeries = certData_decoded['toBeSigned']['crlSeries']
+        new_cert.tbs.validityPeriod_start = certData_decoded['toBeSigned']['validityPeriod']['start']
+
+        duration = certData_decoded['toBeSigned']['validityPeriod']['duration'][0]
+        if duration == 'hours': 
+            new_cert.tbs.validityPeriod_duration = certData_decoded['toBeSigned']['validityPeriod']['duration'][1]
+        # AppPermissions
+        for appPermDecoded in certData_decoded['toBeSigned']['appPermissions']:
+            newServ = GNpsidSsp(psid=None, bitmapSsp=None)
+            newServ.psid = appPermDecoded['psid']
+            service_permission = appPermDecoded.get('ssp', None)
+            if service_permission:
+                if service_permission[0] == 'bitmapSsp':
+                    newServ.bitmapSsp = service_permission[1]
+            new_cert.tbs.appPermissions.append(newServ)
+          
+        new_cert.tbs.symAlgEnc = certData_decoded['toBeSigned']['encryptionKey']['supportedSymmAlg']
+        
+        public_key = certData_decoded['toBeSigned']['encryptionKey'].get('publicKey', None)
+        
+        if public_key is not None and public_key[0]=='eciesNistP256':
+            eciesNistP256 = public_key[1]
+            if eciesNistP256[0] == 'x-only':
+                new_cert.tbs.encPublicKey.p256_x_only = eciesNistP256[1]
+            elif eciesNistP256[0] == 'fill':
+                new_cert.tbs.encPublicKey.p256_fill = None
+            elif eciesNistP256[0] == 'compressed-y-0':
+                new_cert.tbs.encPublicKey.p256_compressed_y_0 = eciesNistP256[1]
+            elif eciesNistP256[0] == 'compressed-y-1':
+                new_cert.tbs.encPublicKey.p256_compressed_y_1 = eciesNistP256[1]
+            elif eciesNistP256[0] == 'uncompressed':
+                new_cert.tbs.encPublicKey.p256_uncompressed_x = eciesNistP256[1]
+                new_cert.tbs.encPublicKey.p256_uncompressed_y = eciesNistP256[2]
+        # verifyKeyIndicator
+        verifyKeyIndicator = certData_decoded['toBeSigned'].get('verifyKeyIndicator', None)
+        if verifyKeyIndicator and verifyKeyIndicator[0] == 'verificationKey':
+            verificationKey = verifyKeyIndicator[1]
+            if verificationKey[0] == 'ecdsaNistP256':
+                ecdsaNistP256 = verificationKey[1]
+                if ecdsaNistP256[0] == 'x-only':
+                    new_cert.tbs.verifyKeyIndicator.p256_x_only = ecdsaNistP256[1]
+                elif ecdsaNistP256[0] == 'fill':
+                    new_cert.tbs.verifyKeyIndicator.p256_fill = None
+                elif ecdsaNistP256[0] == 'compressed-y-0':
+                    new_cert.tbs.verifyKeyIndicator.p256_compressed_y_0 = ecdsaNistP256[1]
+                elif ecdsaNistP256[0] == 'compressed-y-1':
+                    new_cert.tbs.verifyKeyIndicator.p256_compressed_y_1 = ecdsaNistP256[1]
+                elif ecdsaNistP256[0] == 'uncompressed':
+                    new_cert.tbs.verifyKeyIndicator.p256_uncompressed_x = ecdsaNistP256[1]
+                    new_cert.tbs.verifyKeyIndicator.p256_uncompressed_y = ecdsaNistP256[2]
+        
+        signcertData_decoded = certData_decoded.get('signature', None)
+        print(signcertData_decoded)
+        if signcertData_decoded[0] == 'ecdsaNistP256Signature':
+            ecdsaNistP256Signature = signcertData_decoded[1]
+            present4 = ecdsaNistP256Signature.get('rSig', None)
+            if present4 is not None:
+                if present4[0] == 'x-only':
+                    new_cert.rSig.p256_x_only = present4[1]
+                elif present4[0] == 'fill':
+                    new_cert.rSig.p256_fill = None
+                elif present4[0] == 'compressed_y_0':
+                    new_cert.rSig.p256_compressed_y_0 = present4[1]
+                elif present4[0] == 'compressed_y_1':
+                    new_cert.rSig.p256_compressed_y_1 = present4[1]
+                elif present4[0] == 'uncompressed':
+                    new_cert.rSig.p256_uncompressed_x = present4[1]
+                    new_cert.rSig.p256_uncompressed_y = present4[2]
+            if ecdsaNistP256Signature['sSig'] is not None:
+                new_cert.signature_sSig = ecdsaNistP256Signature['sSig']
+        
+        # Recover the EC key pair
+        self.ephemeral = False
+        public_key = self.recoverECKeyPair(self.ephemeral, id)
+        # Get the ephemeral key pair
+        self.ephemeral = True
+        EPHpublic_key = self.recoverECKeyPair(self.ephemeral, id)
+
+        m_generationTime = self.getCurrentTimestamp()
+        m_generationTime32 = (m_generationTime // 1_000_000) & 0xFFFFFFFF
+
+        # Inner EC request
+        innerRequest = {}
+        ITS_S_ID = bytes.fromhex(ini.itsID)
+        innerRequest['itsId'] = ITS_S_ID
+        innerRequest['certificateFormat'] = self.m_certFormat
+        
+        # Set the verification key
+        innerRequest['publicKeys'] = {}
+        if EPHpublic_key.prefix == 'compressed_y_0':
+            innerRequest['publicKeys']['verificationKey'] = ('ecdsaNistP256', ('compressed-y-0', EPHpublic_key.pk))
+        elif EPHpublic_key.prefix == 'compressed_y_1':
+            innerRequest['publicKeys']['verificationKey'] = ('ecdsaNistP256', ('compressed-y-1', EPHpublic_key.pk))
+        
+        # appPermissions
+        appPermission = []
+        psid1 = {}
+        psid1['psid'] = self.m_psid
+        servicePermission1 = ('bitmapSsp', bytes.fromhex(ini.bitmapSspEA))
+        psid1['ssp'] = servicePermission1
+        appPermission.append(psid1)
+
+        # requestedSubjectAttributes: include validityPeriod of 1 hour (ETSI 103 097 / 102 941)
+        requested_attrs = {'appPermissions': appPermission}
+        validityPeriod_req = {
+            'start': m_generationTime32,               # Time32 (TAI). Use 32-bit value to satisfy ASN.1 UINT32
+            'duration': ('hours', 168)                   # Request a certificate valid for 1 hour
+        }
+        requested_attrs['validityPeriod'] = validityPeriod_req
+
+        innerRequest['requestedSubjectAttributes'] = requested_attrs
+        request_result = asn1_modules.encode('InnerEcRequest', innerRequest)
+
+        # ---------- EtsiTs1030971Data-Signed ----------------
+        ieeeData = {}
+        ieeeData['protocolVersion'] = self.m_protocolversion
+        contentContainer1 = ['signedData', 'placeholder']
+        signData = {}
+        signData['hashId'] = self.m_hashId
+        tbsOuter = {}
+        signPayload = {}
+        dataPayload2 = {}
+        dataPayload2['protocolVersion'] = self.m_protocolversion
+        
+        # ---------- EtsiTs102941Data ----------------
+        dataContentPayload2 = ['unsecuredData', 'placeholder']
+        dataPayload102 = {}
+        dataPayload102['version'] = 1
+        dataContentPayload102 = ['enrolmentRequest', 'placeholder']
+
+        dataPayload = {}
+        dataPayload['protocolVersion'] = self.m_protocolversion
+        dataContentPayload = ['signedData', 'placeholder']
+        signDataInner = {}
+        signDataInner['hashId'] = self.m_hashId
+        tbsInner = {}
+        signPayloadInner = {}
+        dataPayloadInner = {}
+        dataPayloadInner['protocolVersion'] = self.m_protocolversion
+        dataContentPayloadInner = ('unsecuredData', request_result)
+        dataPayloadInner['content'] = dataContentPayloadInner
+        #---------- Payload InnerECrequest ----------------
+        signPayloadInner['data'] = dataPayloadInner
+        tbsInner['payload'] = signPayloadInner
+
+        tbsInner['headerInfo'] = {}
+        tbsInner['headerInfo']['psid'] = self.m_psid
+        tbsInner['headerInfo']['generationTime'] = m_generationTime
+        signDataInner['tbsData'] = tbsInner
+        
+        tbsInner_encoded = asn1_modules.encode('ToBeSignedData', tbsInner)
+        self.ephemeral = True
+        signMaterial = self.signatureCreation(tbsInner_encoded, self.ephemeral)
+        signDataInner['signer'] = ('self', None)
+
+        signatureContentInner = ['ecdsaNistP256Signature']
+        R = signMaterial.r
+        S = signMaterial.s
+        
+        ecdsaNistP256Signature = {
+            'rSig': ('x-only', R),
+            'sSig': S
+        }
+        signatureContentInner.append(ecdsaNistP256Signature)
+        signDataInner['signature'] = tuple(signatureContentInner)
+        # ---------- EtsiTs103097Data-Signed (InnerECManagerSignedForPOP) ----------------
+        dataContentPayload[1] = signDataInner
+        dataPayload['content'] = tuple(dataContentPayload)
+        
+        dataContentPayload102[1] = dataPayload
+        dataPayload102['content'] = tuple(dataContentPayload102)
+        pop_request = asn1_modules.encode('EtsiTs102941Data', dataPayload102)
+
+        dataContentPayload2[1] = pop_request
+        dataPayload2['content'] = tuple(dataContentPayload2)
+        signPayload['data'] = dataPayload2
+        tbsOuter['payload'] = signPayload
+        
+        tbsOuter['headerInfo'] = {}
+        tbsOuter['headerInfo']['psid'] = self.m_psid
+        tbsOuter['headerInfo']['generationTime'] = m_generationTime
+        signData['tbsData'] = tbsOuter
+        # ---------- EtsiTs102941Data ----------------
+        tbsOuter_encoded = asn1_modules.encode('ToBeSignedData', tbsOuter)
+        self.ephemeral = False
+        sign_materialOuter = self.signatureCreation(tbsOuter_encoded, self.ephemeral)
+        signData['signer'] = ('self', None)
+        signatureContent = ['ecdsaNistP256Signature']
+
+        R_bytes2 = sign_materialOuter.r
+        S_bytes2 = sign_materialOuter.s
+
+        ecdsaNistP256Signature = {
+            'rSig': ('x-only', R_bytes2),
+            'sSig': S_bytes2
+        }
+        signatureContent.append(ecdsaNistP256Signature)
+        signData['signature'] = tuple(signatureContent)
+        contentContainer1[1] = signData 
+        ieeeData['content'] = tuple(contentContainer1)  # Fixed: use contentContainer1 instead of contentContainer
+        
+        signedData_result = asn1_modules.encode('Ieee1609Dot2Data', ieeeData)
+        dataEnc = self.doEncryption(signedData_result, new_cert.tbs.encPublicKey, certificate_hash, id)
+        
+        # ---------- DATA ENCRYPTED ENCODING PART ----------------
+        ieeeData2 = {}
+        ieeeData2['protocolVersion'] = self.m_protocolversion
+        contentContainer = ['encryptedData', 'placeholder']
+
+        recipientsSeq = []
+        recipInfo = ['certRecipInfo', 'placeholder']
+        recipient = bytes.fromhex(ini.recipientID)
+        recID = recipient
+        recipInfo[1] = {}
+        recipInfo[1]['recipientId'] = recID
+        recipInfo[1]['encKey'] = ['eciesNistP256', 'placeholder']
+        encKey = dataEnc.encryptedKey
+        recipInfo[1]['encKey'][1] = {}
+        recipInfo[1]['encKey'][1]['c'] = encKey
+        eciesTag = dataEnc.eciesTag
+        recipInfo[1]['encKey'][1]['t'] = eciesTag
+        recipInfo[1]['encKey'][1]['v'] = ['uncompressedP256', {}]
+        x_value = dataEnc.x_value
+        y_value = dataEnc.y_value
+        recipInfo[1]['encKey'][1]['v'][1]['x'] = x_value
+        recipInfo[1]['encKey'][1]['v'][1]['y'] = y_value
+        recipInfo[1]['encKey'][1]['v'] = tuple(recipInfo[1]['encKey'][1]['v'])
+        recipInfo[1]['encKey'] = tuple(recipInfo[1]['encKey'])
+        recipInfo = tuple(recipInfo)
+        recipientsSeq.append(recipInfo)
+        contentContainer[1] = {}
+        contentContainer[1]['recipients'] = recipientsSeq
+        contentContainer[1]['ciphertext'] = ('aes128ccm', {})
+        nonce = dataEnc.nonce
+        contentContainer[1]['ciphertext'][1]['nonce'] = nonce
+        ciphertextWithTag = dataEnc.ciphertextWithTag
+        contentContainer[1]['ciphertext'][1]['ccmCiphertext'] = ciphertextWithTag
+
+        ieeeData2 ['content'] = tuple(contentContainer)
+        encode_result = asn1_modules.encode('Ieee1609Dot2Data', ieeeData2)
+
+        # Saving the binary file for the request
+        try:
+            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+            request_path = os.path.join(request_dir, 'requestEC.bin')
+            # Ensure the directory exists before writing the file
+            os.makedirs(request_dir, exist_ok=True)
+            with open(request_path, "wb") as binary_file:
+                binary_file.write(encode_result)
+            # print("[INFO] Request saved as requestEC.bin")
+        except Exception as e:
+            print(f"[ERR] Failed to save binary file: {e}")
+
+        # Calculating request ID (16-byte SHA256 hash of the payload)
+        hash_obj = hashlib.sha256()
+        hash_obj.update(encode_result)
+        hash_digest = hash_obj.digest()
+
+        # Outputting the first 16 bytes of the SHA256 hash as the request ID
+        req_id = ''.join(f'{b:02x}' for b in hash_digest[:16])
+        print(f"[INFO] Request ID: {req_id}")
+    
+    def sendPOST(self, id):
+        try:
+            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+            print(os.path.exists(request_dir))
+            response_dir = os.path.join(self.path, 'certificates', 'responses', f'ITS_{id}')
+            os.makedirs(request_dir, exist_ok=True)  # <--- AGGIUNGI QUESTA RIGA
+            request_path = os.path.join(request_dir, 'requestEC.bin')
+            response_path = os.path.join(response_dir, 'responseEC.bin')
+
+            # Ensure output dir exists
+            os.makedirs(response_dir, exist_ok=True)
+
+            # Read body
+            with open(request_path, "rb") as f:
+                body = f.read()
+            url = "http://0.atos-ea.l0.c-its-pki.eu/"
+            headers = {
+                "Content-Type": "application/x-its-request",
+                "Accept": "application/x-its-response"
+            }
+
+            # Do request with timeout and check status
+            resp = requests.post(url, data=body, headers=headers, timeout=15)
+            resp.raise_for_status()
+
+            # Save response
+            with open(response_path, "wb") as f:
+                f.write(resp.content)
+
+            print(f"[INFO] Response saved to {response_path}")
+            return response_path
+
+        except Exception as e:
+            if hasattr(e, 'response') and e.response is not None:
+                print(e.response.text)
+            print(f"[ERR] Error during POST request: {e}")
+            return None
+    
+# usage example
+if __name__ == "__main__":
+
+    inifile = '/Users/giuseppe/Desktop/TRACEN-x/PKIManager/PKI_info.ini'
+
+    manager = ECManager()    
+    manager.regeneratePEM()
+    manager.createRequest(inifile)
+    response_file = manager.sendPOST()
+    if response_file:
+        print(f"Response saved to: {response_file}")
+    
+    ec_response = ECResponse()
+    certificate = ec_response.getECResponse()
+    
+    if certificate:
+        print("Certificate retrieved successfully:")
+    else:
+        print("Failed to retrieve certificate.")
+
+
