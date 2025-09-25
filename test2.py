@@ -1,4 +1,5 @@
 from PKIManager import ECManager, ECResponse
+from PKIManager import ATManager
 from scapy.all import rdpcap, raw
 import os
 import json
@@ -76,9 +77,18 @@ print(num_certs)
 
 manager = ECManager()  
 response = ECResponse()
+atManager = ATManager()
+
 
 for i in range(2):
     #manager.regeneratePEM(i)
     #manager.createRequest(i)
-    #response_file = manager.sendPOST(i)-
-    print(response.getECResponse(i))
+    #response_file = manager.sendPOST(i)
+    response.getECResponse(i)
+    ec = response.m_ecBytesStr
+    atManager.m_ECHex = ec
+    atManager.regeneratePEM(i)
+    atManager.createRequest(i)
+    atManager.sendPOST(i)
+    
+

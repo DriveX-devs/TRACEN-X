@@ -25,8 +25,9 @@ from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, Prehashed
 
 
-from INIReader import INIReader
-from ECResponse import ECResponse
+from .INIReader import INIReader
+from .ECResponse import ECResponse
+from .CRReader import CRRReader
 from dataclasses import dataclass
 
 @dataclass
@@ -133,6 +134,8 @@ class ATManager:
         self.m_bitmapSspCPM = '01'
 
         self.m_ECHex = None 
+        self.path = os.path.abspath(os.path.dirname(__file__))
+
     
     @staticmethod
     def retrieveStringFromFile(file_name):
@@ -218,15 +221,16 @@ class ATManager:
             counter += 1
         return out[:out_len]
 
-    def encryptMessage(self, plaintext: bytes, receiverPublicKey: ec.EllipticCurvePublicKey, p1: bytes | None = None):
+    def encryptMessage(self, plaintext: bytes, receiverPublicKey: ec.EllipticCurvePublicKey, p1: bytes | None = None, id: int| None = None):
         # 1) Generate random AES key and nonce
         aesKey = os.urandom(self.AES_KEY_LENGTH)  # AES-128, 128 bit key
         nonce = os.urandom(self.NONCE_LENGTH)     # 12 byte nonce for AES-CCM
+        filePath = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}', "pskAT.bin")
 
         # Print and save the AES key (matching C++ ATManager behavior)
         aes_key_hex = ''.join(f'{byte:02x}' for byte in aesKey)
         print(f"[INFO] Shared key: {aes_key_hex}")
-        self.saveStringToFile(aes_key_hex, "pskAT.bin")
+        self.saveStringToFile(aes_key_hex, filePath)
 
         # 2) Encrypt with AES-128-CCM (using aesKey and nonce)
         aead = AESCCM(aesKey, tag_length=self.AES_CCM_TAG_LENGTH)
@@ -267,7 +271,7 @@ class ATManager:
             "aesCcmTag": aesCcmTag,
         }
     
-    def doEncryption(self, message: bytes, encPkEA: GNecdsaNistP256, p1):
+    def doEncryption(self, message: bytes, encPkEA: GNecdsaNistP256, p1, id: int | None = None):
         compression = 0
         publicKeyEA = b""
         if encPkEA.p256_x_only:
@@ -287,7 +291,8 @@ class ATManager:
 
         data = EncData()
         
-        encryption_result = self.encryptMessage(message, receiver_pub_key, p1)
+        # FIX: Remove extra argument, pass only message, receiver_pub_key, p1, id
+        encryption_result = self.encryptMessage(message, receiver_pub_key, p1, id)
         
         data.encryptedKey = encryption_result["encrypted_key"]
         data.ephemeralPublicKey = encryption_result["ephemeral_public_key"]
@@ -305,7 +310,7 @@ class ATManager:
         data.ciphertextWithTag = encryption_result["ciphertext"] + encryption_result["aesCcmTag"]
 
         return data
-
+ 
     def loadECKeyFromFile(self, private_key_file: str, public_key_file: str, password: bytes | None = None):
         try:
             with open(private_key_file, 'rb') as f:
@@ -352,20 +357,22 @@ class ATManager:
             return None
         return ec_key
     
-    def recoverECKeyPair(self, ephemeral: bool) -> "GNpublicKey":
+    def recoverECKeyPair(self, ephemeral: bool, id: int) -> "GNpublicKey":
         public_key = GNpublicKey()
+        keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}')
         try:
             if ephemeral:
-                private_key_file = "./pkiReqRes/ephSKEY2.pem"
-                public_key_file = "./pkiReqRes/ephPKEY2.pem"
+                private_key_file = os.path.join(keys_folder,"ephSKEY2.pem")
+                public_key_file = os.path.join(keys_folder,"ephPKEY2.pem")
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
                 if ec_key is None:
                     return public_key
                 # Memorizza come chiave ephemeral
                 self.m_EPHecKey = ec_key
             else:
-                private_key_file = "./pkiReqRes/ephSKEY.pem"
-                public_key_file = "./pkiReqRes/ephPKEY.pem"
+
+                private_key_file = os.path.join(keys_folder,"ephSKEY.pem")
+                public_key_file = os.path.join(keys_folder,"ephPKEY.pem")
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
                 if ec_key is None:
                     return public_key
@@ -490,15 +497,23 @@ class ATManager:
         # Emula il cast a uint32_t del C++ (wrap modulo 2^32)
         return tai_seconds_since_2004 & 0xFFFFFFFF
     
-    def readIniFile(self, filename: str = "./PKI_info.ini") -> "IniAT":
+    def readIniFile(self, id) -> "IniAT":
         """Python translation of ATManager::readIniFile().
         Reads PKI_info.ini using INIReader and returns an IniAT with defaults of "UNKNOWN" like the C++ code.
         Prints an error if the file can't be loaded (ParseError() < 0).
         """
-        reader = INIReader(filename)
+        ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
+        credentials = os.path.join(self.path, 'certificates', 'credentials.json')
+        
+        reader = INIReader(ini_path)
         if reader.ParseError() < 0:
-            print(f"[ERR] Can't load '{filename}'")
-
+            print(f"[ERR] Can't load '{ini_path}'")
+        
+        credentials = CRRReader(credentials, id)
+        if credentials is None:
+            print(f"[ERR] Can't load credentials from '{credentials}'", file=sys.stderr)
+            return None
+        
         ini = IniAT(
             aaCert1=reader.Get("ATinfo", "AAcert1", "UNKNOWN"),
             aaCert2=reader.Get("ATinfo", "AAcert2", "UNKNOWN"),
@@ -509,12 +524,15 @@ class ATManager:
             bitmapDENM=reader.Get("ATinfo", "bitmapDENM", "UNKNOWN"),
             eaIDstring=reader.Get("ATinfo", "eaIDstring", "UNKNOWN"),
         )
+        self.AACertificate = bytes.fromhex(ini.aaCert1+ini.aaCert2+ini.aaCert3+ini.aaCert4)
         return ini
     
-    def regeneratePEM(self):
+    def regeneratePEM(self,id):
         """Generate new EC key pair and save to PEM files"""
-        priv_path = './pkiReqRes/ephSKEY2.pem'
-        pub_path = './pkiReqRes/ephPKEY2.pem'
+        keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}')
+
+        priv_path = os.path.join(keys_folder,'ephSKEY2.pem')
+        pub_path = os.path.join(keys_folder,'ephPKEY2.pem')
         
         try:
             # Create output directory if missing
@@ -573,22 +591,22 @@ class ATManager:
             print("Error generating EC key pair", file=sys.stderr)
             return
     
-    def createRequest(self):
+    def createRequest(self,id):
 
         if self.m_ECHex is None:
             print("[ERROR] Critical error: m_ECHex is None. Cannot create any request.", file=sys.stderr)
             self.m_terminatorFlagPtr = True
             return None
         
-        iniData = self.readIniFile('/Users/giuseppe/Desktop/TRACEN-x/PKIManager/PKI_info.ini')
+        iniData = self.readIniFile(id)
         asn_folder = os.path.join("data", "asn", "security")
         asn_files = glob.glob(os.path.join(asn_folder, "*.asn"))
         if not asn_files:
             print(f"[ERR] No ASN.1 file found in {asn_folder}")
             return None
+        
         asn1_modules = asn1tools.compile_files(asn_files, 'oer')
-
-        AAcertificate = bytes.fromhex(iniData.aaCert1 + iniData.aaCert2 + iniData.aaCert3 + iniData.aaCert4)
+        AAcertificate = self.AACertificate
         certificate_hash = self.computeSHA256(AAcertificate)
         certContent = AAcertificate
 
@@ -668,9 +686,10 @@ class ATManager:
             newCert.signature_sSig = signcertData_decoded[1]['sSig']
         
         self.ephemeral = True
-        EPHpublic_key = self.recoverECKeyPair(self.ephemeral)
+        # FIX: Always pass id to recoverECKeyPair
+        EPHpublic_key = self.recoverECKeyPair(self.ephemeral, id)
         self.ephemeral = False
-        public_key = self.recoverECKeyPair(self.ephemeral)
+        public_key = self.recoverECKeyPair(self.ephemeral, id)
 
         m_generationTime = self.getCurrentTimestamp()
 
@@ -810,7 +829,8 @@ class ATManager:
         signedData_result = asn1_modules.encode('Ieee1609Dot2Data', ieeeData)
 
         # ---------- DATA ENCRYPTED ENCODING PART ----------------
-        dataEnc = self.doEncryption(signedData_result, newCert.tbs.encPublicKey, certificate_hash)
+        # FIX: Pass id to doEncryption, which will pass it to encryptMessage
+        dataEnc = self.doEncryption(signedData_result, newCert.tbs.encPublicKey, certificate_hash, id)
         ieeeData2 = {}
         ieeeData2['protocolVersion'] = self.m_protocolVersion
         contentContainer = ('encryptedData',{})
@@ -839,7 +859,9 @@ class ATManager:
 
         # Saving the binary file for the request
         try:
-            with open("./pkiReqRes/ATrequest.bin", "wb") as f:
+            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+            request_path = os.path.join(request_dir, 'requestAT.bin')
+            with open(request_path, "wb") as f:
                 f.write(encode_result)
         except Exception as e:
             print("Error opening file for writing the request", file=sys.stderr)
@@ -853,24 +875,25 @@ class ATManager:
         )
         print(f"[INFO] Request ID: {request_id_hex}")
     
-    def sendPOST(self):
+    def sendPOST(self,id):
         try:
-            # File paths matching C++ implementation
-            file_path = "/Users/giuseppe/Desktop/TRACEN-x/pkiReqRes/ATrequest.bin"
-            response_file_path = "./pkiReqRes/responseAT.bin"
+            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+            response_dir = os.path.join(self.path, 'certificates','responses', f'ITS_{id}')
+            request_path = os.path.join(request_dir, 'requestAT.bin')
+            response_path = os.path.join(response_dir, 'responseAT.bin')
 
             # Ensure output directory exists
-            response_dir = os.path.dirname(response_file_path)
+            response_dir = os.path.dirname(response_path)
             if response_dir:
                 os.makedirs(response_dir, exist_ok=True)
 
-            # Check if request file exists
-            if not os.path.exists(file_path):
-                print(f"[ERR] File '{file_path}' does not exist.")
+            # FIX: Check if request_path exists, not response_path
+            if not os.path.exists(request_path):
+                print(f"[ERR] File '{request_path}' does not exist.")
                 return
 
             # Read the binary request file
-            with open(file_path, 'rb') as f:
+            with open(request_path, 'rb') as f:
                 file_data = f.read()
 
             # URL and headers matching C++ implementation
@@ -884,10 +907,10 @@ class ATManager:
             response.raise_for_status()
 
             # Save response to binary file
-            with open(response_file_path, 'wb') as f:
+            with open(response_path, 'wb') as f:
                 f.write(response.content)
 
-            print(f"[INFO] Response saved to {response_file_path}")
+            print(f"[INFO] Response saved to {response_path}")
 
         except requests.exceptions.RequestException as e:
             print(f"[ERR] Request failed, error: {e}")

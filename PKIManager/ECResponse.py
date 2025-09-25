@@ -744,8 +744,9 @@ class ECResponse:
                 CPath = os.path.join(self.path, 'certificates','certificates.json')
 
                 certDict = {
-                    self.itsID: {
+                    str(id): {
                         'EC' :{
+                        "itsID" : self.itsID,
                         "certificate": ec_hex.hex(),
                         "start": ECres.certificate.tbs.validityPeriod_start,
                         "end": ECres.certificate.tbs.validityPeriod_start + ECres.certificate.tbs.validityPeriod_duration * 3600
