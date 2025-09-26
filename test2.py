@@ -86,11 +86,11 @@ for i in range(2):
     #manager.createRequest(i)
     #response_file = manager.sendPOST(i)
     response.getECResponse(i)
-    ec = response.m_ecBytesStr
-    atManager.m_ECHex = ec
-    atManager.regeneratePEM(i)
-    atManager.createRequest(i)
-    atManager.sendPOST(i)
+    #ec = response.m_ecBytesStr
+    #atManager.m_ECHex = ec
+    #atManager.regeneratePEM(i)
+    #atManager.createRequest(i)
+    #atManager.sendPOST(i)
     atResponse.getATResponse(i)
     
 

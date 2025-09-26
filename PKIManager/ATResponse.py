@@ -5,7 +5,7 @@ import sys
 import glob
 import json
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, is_dataclass
 from typing import List
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -24,7 +24,6 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from .INIReader import INIReader
 from .CRReader import CRRReader
-from dataclasses import dataclass
 
 
 
@@ -161,6 +160,18 @@ class ATResponse:
         self.m_ecKey = None
         self.m_EPHKey = None
         self.m_aesKeys = {}
+
+    @staticmethod
+    def _to_serializable(value):
+        if is_dataclass(value):
+            value = asdict(value)
+        if isinstance(value, dict):
+            return {key: ATResponse._to_serializable(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [ATResponse._to_serializable(item) for item in value]
+        if isinstance(value, bytes):
+            return value.hex()
+        return value
 
     @staticmethod
     def retrieveStringFromFile(file_name):
@@ -760,7 +771,8 @@ class ATResponse:
                 CPath = os.path.join(self.path, 'certificates', 'certificates.json')
                 cert_entry = {
                     'itsID': ini.itsID,
-                    'certificate': at.hex(),
+                    'certificateRaw': at.hex(),
+                    'certificate': self._to_serializable(ATres.certificate),
                     'start': ATres.certificate.tbs.validityPeriod_start,
                     'end': ATres.certificate.tbs.validityPeriod_start + ATres.certificate.tbs.validityPeriod_duration * 3600
                 }
