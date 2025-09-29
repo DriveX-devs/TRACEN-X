@@ -7,13 +7,13 @@ from scapy.all import *
 from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
+from utils import countCertificates
+from utils import Security
 import glob
-# TODO: How many certificates do we need?
-# TODO: How many certificates have we?
-# TODO: asking the difference
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
+BASICHEADER = 4
 ETHER_LENGTH = 14
 GEONET_TS_LOW = 20
 GEONET_TS_HIGH = 24
@@ -58,6 +58,7 @@ DENM = asn.compile_files(denm_asn, "uper")
 asn_files = glob.glob(os.path.join(security_folder, "*.asn"))
 SECURITY = asn.compile_files(asn_files, 'oer')
 
+
 class AMQPSender(MessagingHandler):
     def __init__(self, server, port, topic):
         super().__init__()
@@ -74,7 +75,7 @@ class AMQPSender(MessagingHandler):
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-
+            
     def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
         success = True
         try:
@@ -162,7 +163,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     - amqp_server_port (str): Port of the AMQP server
     - amqp_topic (str): Topic to publish messages to on the AMQP server
     """
-
+    security = Security()
+    MAX_CERTIFICATES = 5
+    vehicle_dict = {str(key):None for key in range(MAX_CERTIFICATES)}
+    
     if enable_amqp:
         amqp_sender = AMQPSender(amqp_server_ip, amqp_server_port, amqp_topic)
         amqp_thread = threading.Thread(target=amqp_sender.run, daemon=True)
@@ -187,13 +191,11 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     try:
         for i, pkt in enumerate(pcap):
             pkt_ts_us = int(1e6 * (pkt.time - base_ts))
-
+           
             if stop_event and stop_event.is_set():
                 break
-
             if start_time is not None and pkt_ts_us < start_time:
                 continue
-
             if end_time is not None and pkt_ts_us > end_time:
                 break
 
@@ -219,12 +221,11 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                     # Check if the security layer is active
                     security = False if data[:1] == b'\x11' else True
                     # Set the fields for pkt reconstruction to None to check if they will be filled properly
-                    found = False
                     facilities = None
                     port = None
                     btp = None
                     new_geonet = None
-                    tail_security = None
+                    
                     if not security:
                         # Packet without the security layer
                         # Extract the GeoNet and calculate the new timestamp
@@ -240,78 +241,41 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         # Take the rest of the packet (Facilities layer)
                         facilities = data[BTP_HIGH:]
                     else:
-                        source_addr = ether_part[ETH_SRC_ADDR:-2]
-                        timestamp_idx = 0
-                        payload_idx = 0
-                        shb = None
-                        payload_length = None
-                        found_first = False
-                        found = False
-                        while True:
-                            if payload_idx + FIRST_SEARCH_PAD > len(data):
-                                break
-                            # Take bytes slice to search FIRST_SEARCH_SEQ
-                            it = data[payload_idx: payload_idx+FIRST_SEARCH_PAD]
-                            if it == FIRST_SEARCH_SEQ:
-                                payload_idx += FIRST_SEARCH_PAD
-                                while True:
-                                    if payload_idx + SECOND_SEARCH_PAD > len(data):
-                                        break
-                                    # Take bytes slice to search SECOND_SEARCH_SEQ
-                                    it = data[payload_idx: payload_idx+SECOND_SEARCH_PAD]
-                                    if it in SECOND_SEARCH_SEQ:
-                                        found_first = True
-                                        # Extract information whether the packet is using Single Hop Broadcast (SHB) or Geo-scoped
-                                        shb = True if it == SECOND_SEARCH_SEQ[0] else False
-                                        payload_idx += SECOND_SEARCH_PAD
-                                        payload_idx += 2
-                                        # Extract the payload length
-                                        payload_length = int.from_bytes(data[payload_idx: payload_idx+2], byteorder="big")
-                                        break
-                                    else:
-                                        payload_idx += 1
-                                found = True if found_first else False
-                                if found:
-                                    found = False
-                                    timestamp_idx = payload_idx + 2
-                                    while True:
-                                        if timestamp_idx + ETH_SRC_ADDR > len(data):
-                                            break
-                                        # Take bytes slice to search the MAC Address repetition
-                                        it = data[timestamp_idx: timestamp_idx + ETH_SRC_ADDR]
-                                        if it == source_addr:
-                                            found = True
-                                            # Found the timestamp position in the GeoNet
-                                            timestamp_idx += ETH_SRC_ADDR
-                                            break
-                                        else:
-                                            timestamp_idx += 1
-                                if found:
-                                    break
-                            else:
-                                payload_idx += 1
-
-                        if found:
-                            # Use the starting point of the BTP to retrieve the GeoNet, then update the timestamp
-                            tail_security = data[-SECURITY_TAIL:]
-                            if shb == True:
-                                # We are in presence of a packet which uses SHB, such as CAM, VAM, CPM
-                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB]
-                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD]
-                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_SHB + BTP_PAD + payload_length]
-                            else:
-                                # We are in presence of a packet which uses Geo-scoped, such as DENM
-                                geonet = data[:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED]
-                                btp = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD]
-                                facilities = data[timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD:timestamp_idx + AFTER_TIMESTAMP_PAD_GEOSCOPED + BTP_PAD + payload_length]
-                            # Update the timestamp
-                            current_timestamp = get_timestamp_ms(purpose="GeoNet")
-                            assert current_timestamp > 0, "Error in time calculation"
-                            current_timestamp = current_timestamp.to_bytes(4, byteorder="big", signed=False)
-                            # If all the searches went well we can create the New GeoNet
-                            new_geonet = geonet[:timestamp_idx] + current_timestamp + geonet[timestamp_idx+len(current_timestamp):]
-                            # Extract the BTP to know the port
-                            port = int.from_bytes(btp[:2], byteorder="big")
+                        pack = raw(pkt)
+                        EtherAndBasic = pack[:ETHER_LENGTH+BASICHEADER]
+                        DecodedPacket = SECURITY.decode("Ieee1609Dot2Data", pack[18:])
+                        UnsecuredData = DecodedPacket['content'][1]['tbsData']['payload']['data']['content'][1]
+                        Signer = DecodedPacket['content'][1]['signer'][0]  # header
+                        if Signer == 'digest':
+                            isCertificate = False
+                        elif Signer == 'certificate':
+                            isCertificate = True
+                        else:
+                            raise ValueError(f"Unknown signer type {Signer}")
+                        
+                        Htype = UnsecuredData[1]
+                        if Htype == 80:  # GeoNet
+                            # SHB case CAMs
+                            TSPOS = 16
+                            CurrentTime = get_timestamp_ms(purpose="GeoNet")
+                            assert CurrentTime > 0, "Error in time calculation"
+                            CurrentTime = CurrentTime.to_bytes(4, byteorder="big", signed=False)
+                            UnsecuredDataUpdate = UnsecuredData[:TSPOS] + CurrentTime + UnsecuredData[TSPOS+4:]
+                        elif Htype == 64:  # GeoScoped
+                            # GeoScoped case DENMs
+                            TSPOS = 20
+                            CurrentTime = get_timestamp_ms(purpose="GeoNet")
+                            assert CurrentTime > 0, "Error in time calculation"
+                            CurrentTime = CurrentTime.to_bytes(4, byteorder="big", signed=False)
+                            UnsecuredDataUpdate = UnsecuredData[:TSPOS] + current_timestamp + UnsecuredData[TSPOS+4:]
+                        else:
+                            raise ValueError(f"Unknown Header Type {Htype}")
+                        # Search for the BTP
+                        plength = int.from_bytes(UnsecuredDataUpdate[4:6],  byteorder="big")
+                        payload = UnsecuredDataUpdate[-plength:]
+                        btp = payload[:4]
+                        port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
+                        facilities = payload[4: -1]
 
                     if not new_geonet or not btp or not facilities or not port:
                         # From both cases (with and without security layer), we need some basic information
@@ -320,6 +284,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                     else:
                         mex_encoded = None
                         if port == 2009:
+                            mtype = 'CPM'
                             # CPM, modify the Reference Time
                             cpm = CPM.decode("CollectivePerceptionMessage", facilities)
                             old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
@@ -351,6 +316,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                         elif port == 2001:
                             # CAM, modify the Generation Delta Time
+                            mtype = 'CAM'
                             cam = CAM.decode("CAM", facilities)
                             old_reference_time = cam["cam"]["generationDeltaTime"]
                             new_reference_time = get_timestamp_ms(purpose="CAM")
@@ -383,6 +349,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = CAM.encode("CAM", cam)
 
                         elif port == 2018:
+                            mtype = 'VAM'
                             # VAM, modify the Generation Delta Time
                             vam = VAM.decode("VAM", facilities)
                             old_reference_time = vam["vam"]["generationDeltaTime"]
@@ -405,6 +372,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             mex_encoded = VAM.encode("VAM", vam)
 
                         elif port == 2002:
+                            mtype = 'DENM'
                             denm = DENM.decode("DENM", facilities)
                             old_reference_time = denm["denm"]["management"]["detectionTime"]
                             new_reference_time = get_timestamp_ms(purpose="DENM")
@@ -422,17 +390,20 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
 
                             mex_encoded = DENM.encode("DENM", denm)
-
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
 
                         # Build the new packet
                         raw_part = new_geonet + btp + mex_encoded
+                        
                         if ether_part and raw_part:
                             new_pkt = ether_part + raw_part
                         if security:
-                            # Add the Security Tail
-                            new_pkt = new_pkt + tail_security
-
+                            # rebuild the security layer
+                            NewPayload = btp + mex_encoded
+                            UnsecuredDataUpdate[-plength:] = NewPayload
+                            SecuredPacket = security.createSecurePacket(UnsecuredDataUpdate, certificates, vehicle_id, isCertificate, mtype)
+                            new_pkt = EtherAndBasic + SecuredPacket
+                
                 except Exception as e:
                     print(f"Error while processing packet {i}: {e}")
                     continue
@@ -465,44 +436,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             amqp_sender.stop()
             amqp_thread.join()
 
-def count_certificates(pcap_path, start_time= None, end_time= None):
-    # check if pcap_path exists
-    if not os.path.exists(pcap_path):
-        print(f"Pcap file {pcap_path} does not exist.")
-        return
-    
-    packets = rdpcap(pcap_path)
-    bts = packets[0].time  # epoch time in seconds
-    
-    start = bts + start_time if start_time else bts
-    end = bts + end_time if end_time else None
 
-    HEADER_LENGTH = 14
-    TAIL_LENGTH = 66
-    SEQUENCE = b'\x81\x01\x01\x80\x03\x00\x80'
-
-    digests = set()
-    count = 0
-    for pkt in packets:
-        pkt_time = pkt.time
-        if pkt_time < start:
-            continue
-        if end and pkt_time > end:
-            break
-        data = raw(pkt)[HEADER_LENGTH:-TAIL_LENGTH]  # dati tra header e coda
-        security = False if data[:1] == b'\x11' else True  # controlla se il pacchetto è secured
-        if not security:
-            continue  # salta i pacchetti non secured
-        if SEQUENCE in data:
-            count += 1
-            continue
-        digest = raw(pkt)[-74:-66] 
-        digests.add(digest.hex())
-
-    return len(digests)
-
-def ask_certificates(num_certs):
-    pass
 
 #write_pcap(input_filename="/Users/giuseppe/Desktop/TRACEN-x/cattura_MIS_80211p.pcapng", interface="en0", start_time=0, end_time=60, update_datetime=False, new_pcap="new_pcap.pcap")
 

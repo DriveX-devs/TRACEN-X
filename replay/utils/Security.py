@@ -392,8 +392,10 @@ if __name__ == "__main__":
     with open(certificates, 'r') as f:
         certificates = json.load(f)
     sec = Security()
-    encoded = sec.createSecurePacket(dummy_bytes, certificates, 0, True, 'CAM')
-    print(len(encoded))
+    encoded0 = sec.createSecurePacket(dummy_bytes, certificates, 0, False, 'CAM')
+    encoded1 = sec.createSecurePacket(dummy_bytes, certificates, 1, False, 'CAM')
+
+    print(encoded0==encoded1)
 
 
 

@@ -9,7 +9,9 @@ from can_utils import write_CAN
 from gui_utils import serial_gui
 from serial_utils import write_serial
 from pcap_utils import write_pcap
-from pcap_utils import count_certificates
+from utils import countCertificates
+from utils import count_active_certificates
+from ..PKIManager import ATManager, ATResponse, ECManager, ECResponse
 
 def signal_handler(sig, frame, stop_event):
     """
@@ -150,7 +152,8 @@ def main():
 
     stop_event = Event()
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
-
+    # conteggio
+    
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
         serial_process = Process(
@@ -215,11 +218,50 @@ def main():
         csv_process.start()
 
     if enable_pcap:
+        
         assert os.path.exists(pcap_filename)
+        
         if update_datetime:
-            # count the number of needed certificates
-            certificates, _ = count_certificates(pcap_filename, start_time, end_time)
+            certificates = countCertificates(pcap_filename, start_time, end_time)
+            print(f"The pcap file contains {certificates} certificates")
+            active_certificates = count_active_certificates() # aggiungere il path
+            for key in active_certificates.keys():
+                ECisValid, ATisValid = active_certificates[key]
+                if not ECisValid:
+                    # ask EC and AT certificates
+                    manager = ECManager()  
+                    response = ECResponse()
+                    atManager = ATManager()
+                    atResponse = ATResponse()
+                    
+                    manager.regeneratePEM(key)
+                    manager.createRequest(key)
+                    response_file = manager.sendPOST(key)
+                    response.getECResponse(key)
 
+                    ec = response.m_ecBytesStr
+                    atManager.m_ECHex = ec
+                    atManager.regeneratePEM(key)
+                    atManager.createRequest(key)
+                    atManager.sendPOST(key)
+
+                elif ECisValid and not ATisValid:
+                    response = ECResponse()
+                    atManager = ATManager()
+                    atResponse = ATResponse()
+
+                    response.getECResponse(key)
+                    ec = response.m_ecBytesStr
+                    atManager.m_ECHex = ec
+                    atManager.regeneratePEM(key)
+                    atManager.createRequest(key)
+                    atManager.sendPOST(key)
+                    atResponse.getATResponse(key)
+
+            if certificates > len(active_certificates):
+                print(f"There are not enough active certificates. There are {len(active_certificates)} active certificates.")
+                print("Please add new certificates before starting the pcap emulation.")
+                exit(1)
         # ask certificates    
         pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic))
         pcap_process.start()
