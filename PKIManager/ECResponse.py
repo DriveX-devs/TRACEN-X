@@ -459,14 +459,18 @@ class ECResponse:
     def readIniFile(self, id) -> "IniEC":
         
         ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
-        credentials = os.path.join(self.path, 'certificates', 'credentials.json')
-        
+        credentials_path = os.path.join(self.path, 'certificates', 'credentials.json')
+
         reader = INIReader(ini_path)
         if reader.ParseError() < 0:
             print(f"[ERR] Can't load '{ini_path}'")
-        credentials = CRRReader(credentials, id)
+
+        credentials = CRRReader(credentials_path, id)
         if credentials is None:
-            print(f"[ERR] Can't load credentials from '{credentials}'", file=sys.stderr)
+            print(
+                f"[ERR] Missing credentials for vehicle '{id}' in '{credentials_path}'",
+                file=sys.stderr,
+            )
             return None
 
         ini = IniEC(
@@ -495,6 +499,10 @@ class ECResponse:
         asn1_modules = asn1tools.compile_files(asn_files, 'oer')
 
         ini = self.readIniFile(id)
+        if ini is None:
+            raise RuntimeError(
+                f"Unable to generate EC response because credentials for vehicle '{id}' are missing"
+            )
 
         binaryCert = self.signSelf
         certificate_hash = self.computeSHA256(binaryCert)

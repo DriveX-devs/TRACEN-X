@@ -8,7 +8,7 @@ from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
 from utils import countCertificates
-from utils import Security
+from utils.Security import Security
 import glob
 
 # Normal packet (without security layer) constants
@@ -187,6 +187,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
         sock.bind((interface, 0))
     except Exception as e:
         print(f"Error: {e}")
+        print("Warning: raw socket unavailable, packets will not be sent on the interface.")
 
     base_ts = pcap[0].time  # epoch time in seconds
     startup_time = time.time() * 1e6
@@ -433,21 +434,20 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
             assert new_pkt is not None, "Something went wrong in new packet building"
 
-            assert sock is not None, "Something went wrong in socket creation or binding"
-
             if new_pcap != "":
                 wrpcap(new_pcap, new_pkt, append=True)
 
-            try:
-                sock.send(new_pkt)
-                if enable_amqp:
-                    # Send the packet to the AMQP broker
-                    properties = compute_properties()
-                    succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
-                    if not succ:
-                        print("ERROR on message sending to the AMQP broker!")
-            except Exception as e:
-                print(f"Error: {e}")
+            if sock is not None:
+                try:
+                    sock.send(new_pkt)
+                    if enable_amqp:
+                        # Send the packet to the AMQP broker
+                        properties = compute_properties()
+                        succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
+                        if not succ:
+                            print("ERROR on message sending to the AMQP broker!")
+                except Exception as e:
+                    print(f"Error: {e}")
     except Exception as e:
         print(f"Error: {e}")
     
@@ -456,6 +456,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
         if enable_amqp:
             amqp_sender.stop()
             amqp_thread.join()
+        if sock is not None:
+            sock.close()
 
 
 

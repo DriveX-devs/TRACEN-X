@@ -1,7 +1,14 @@
 import time
 import json
-import utils
+import sys
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import utils
 from serial_emulator import SerialEmulator
 
 def write_serial(stop_event: Any, server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):

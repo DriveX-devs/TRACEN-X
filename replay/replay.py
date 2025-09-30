@@ -2,6 +2,7 @@ import argparse
 import os
 import signal
 import json
+import sys
 from pathlib import Path
 from multiprocessing import Process, Event
 
@@ -14,7 +15,12 @@ from serial_utils import write_serial
 from pcap_utils import write_pcap
 from utils import countCertificates
 from utils import count_active_certificates
-from ..PKIManager import ATManager, ATResponse, ECManager, ECResponse
+
+# Make sure sibling packages like PKIManager are importable when run as a script.
+project_root = str(Path(__file__).resolve().parents[1])
+if project_root not in sys.path:
+    sys.path.append(project_root)
+from PKIManager import ATManager, ATResponse, ECManager, ECResponse
 
 def signal_handler(sig, frame, stop_event):
     """
@@ -156,10 +162,12 @@ def main():
     stop_event = Event()
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
+
     if enable_pcap and update_datetime:
-        certificates = countCertificates(pcap_filename, start_time, end_time)
+        certificates = countCertificates(pcap_filename, args.start_time, args.end_time)
         print(f"The pcap file contains {certificates} certificates")
-        active_certificates = count_active_certificates() # aggiungere il path
+        active_certificates = count_active_certificates(CERT_PATH)
+        print(active_certificates)
         for key in active_certificates.keys():
             ECisValid, ATisValid = active_certificates[key]
             if not ECisValid:
@@ -172,7 +180,11 @@ def main():
                 manager.regeneratePEM(key)
                 manager.createRequest(key)
                 response_file = manager.sendPOST(key)
-                response.getECResponse(key)
+                try:
+                    response.getECResponse(key)
+                except RuntimeError as exc:
+                    print(f"[ERR] {exc}", file=sys.stderr)
+                    sys.exit(1)
 
                 ec = response.m_ecBytesStr
                 atManager.m_ECHex = ec
@@ -185,7 +197,11 @@ def main():
                 atManager = ATManager()
                 atResponse = ATResponse()
 
-                response.getECResponse(key)
+                try:
+                    response.getECResponse(key)
+                except RuntimeError as exc:
+                    print(f"[ERR] {exc}", file=sys.stderr)
+                    sys.exit(1)
                 ec = response.m_ecBytesStr
                 atManager.m_ECHex = ec
                 atManager.regeneratePEM(key)
@@ -198,7 +214,7 @@ def main():
             print("Please add new certificates before starting the pcap emulation.")
             exit(1)
         # load json file with the certificates
-        filePath = 'placeholder'
+        filePath = CERT_PATH
         with open(filePath, 'r') as f:
             certificates = json.load(f)
         print(f"Loaded {len(certificates)} certificates from {filePath}")
