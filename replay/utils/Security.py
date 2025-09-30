@@ -332,15 +332,10 @@ class Security():
             print(f"Error in getKeyFromCertificate: {e}")
             return None, None
 
-    def createSecurePacket(self, UnsecuredData: bytes, certificates: dict, vehicle_id: int , isCertificate: bool, mType: str) -> cPacket:
+    def createSecurePacket(self, UnsecuredData: bytes, certificate: dict, vehicle_id: int , isCertificate: bool, mType: str) -> cPacket:
         
-        try:
-            vehicle_cert = certificates[str(vehicle_id)]['AT']
-        except KeyError as exc:
-            raise KeyError(f"Missing AT certificate for vehicle {vehicle_id}") from exc
-
-        certficate_info = vehicle_cert['certificate']
-        certificate_raw_hex = vehicle_cert['certificateRaw']
+        certficate_info = certificate['certificate']
+        certificate_raw_hex = certificate['certificateRaw'] 
         
         ieeeData = {}
         ieeeData['protocolVersion'] = self.m_protocolVersion
@@ -359,13 +354,16 @@ class Security():
         if mType == 'CAM':
             tbs['headerInfo'] = {}
             tbs['headerInfo']['psid'] = 36
+        elif mType == 'DENM':
+            tbs['headerInfo'] = {}
+            tbs['headerInfo']['psid'] = 37
     
         m_generationTime = self.getCurrentTimestamp()
         tbs['headerInfo']['generationTime'] = m_generationTime
         ieeeContent[1]['tbsData'] = tbs
 
         certificate_raw = bytes.fromhex(certificate_raw_hex)
-        certificate_decoded = self.decodeASN1('Certificate', certificate_raw)
+        certificate_decoded = self.decodeASN1('CertificateBase', certificate_raw)
 
         if isCertificate:
             ieeeContent[1]['signer'] = ('certificate', [])

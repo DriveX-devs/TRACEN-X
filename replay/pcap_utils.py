@@ -24,10 +24,6 @@ BTP_PORT_HIGH = 2
 # Security packet constants
 ETH_SRC_ADDR = 6
 BTP_PAD = 4
-FIRST_SEARCH_PAD = 4
-FIRST_SEARCH_SEQ = b'\x00\x40\x03\x80'
-SECOND_SEARCH_PAD = 2
-SECOND_SEARCH_SEQ = [b'\x20\x50', b'\x20\x40']
 BTPS = {
     b"\x07\xd2\x00\x00": "DENM",
     b"\x07\xd1\x00\x00": "CAM",
@@ -75,7 +71,7 @@ class AMQPSender(MessagingHandler):
         except Exception as e:
             print(f"Error: {e}")
             exit(-1)
-            
+
     def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
         success = True
         try:
@@ -147,7 +143,7 @@ def get_timestamp_ms(purpose: str) -> int:
     return -1
 
 
-def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str):
+def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str, certificates: dict):
     """
     Sends packets from a pcap file to a network interface within a given time window.
 
@@ -163,10 +159,16 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     - amqp_server_port (str): Port of the AMQP server
     - amqp_topic (str): Topic to publish messages to on the AMQP server
     """
-    security = Security()
-    MAX_CERTIFICATES = 5
-    vehicle_dict = {str(key):None for key in range(MAX_CERTIFICATES)}
     
+    security = Security()
+    LastAssigned = 0
+    MAX_CERTIFICATES = 5
+
+    VehicleDict = {}
+    # TODO
+    # Load the certificates
+    # associate each certificate to a vehicle ID (0, 1, 2, ..., MAX_CERTIFICATES-1)
+
     if enable_amqp:
         amqp_sender = AMQPSender(amqp_server_ip, amqp_server_port, amqp_topic)
         amqp_thread = threading.Thread(target=amqp_sender.run, daemon=True)
@@ -291,7 +293,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             new_reference_time = get_timestamp_ms(purpose="CPM")
                             assert new_reference_time > 0, "Error in time calculation"
                             cpm["payload"]["managementContainer"]["referenceTime"] = new_reference_time
-
                             # TODO to test
                             if "InterferenceManagementZones" in cpm["payload"]:
                                 zones = cpm["payload"]["InterferenceManagementZones"]
@@ -311,6 +312,12 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         old_expiry_time = zone["expiryTime"]
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
+                            
+                            if security:
+                                StationID = cpm['header']['stationID']
+                                if StationID not in VehicleDict.keys():
+                                    VehicleDict[StationID] = LastAssigned
+                                    LastAssigned += 1
 
                             mex_encoded = CPM.encode("CollectivePerceptionMessage", cpm)
 
@@ -347,6 +354,11 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
 
                             mex_encoded = CAM.encode("CAM", cam)
+                            if security:
+                                StationID = cam['header']['stationID']
+                                if StationID not in VehicleDict.keys():
+                                    VehicleDict[StationID] = LastAssigned
+                                    LastAssigned += 1
 
                         elif port == 2018:
                             mtype = 'VAM'
@@ -388,8 +400,14 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         old_expiry_time = zone["expiryTime"]
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
-
+                            
+                            if security:
+                                StationID = denm['header']['stationID']
+                                if StationID not in VehicleDict.keys():
+                                    VehicleDict[StationID] = LastAssigned
+                                    LastAssigned += 1
                             mex_encoded = DENM.encode("DENM", denm)
+
                         assert mex_encoded is not None, "Something went wrong in the message modifications"
 
                         # Build the new packet
@@ -401,7 +419,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             # rebuild the security layer
                             NewPayload = btp + mex_encoded
                             UnsecuredDataUpdate[-plength:] = NewPayload
-                            SecuredPacket = security.createSecurePacket(UnsecuredDataUpdate, certificates, vehicle_id, isCertificate, mtype)
+                            # TODO: dare a securedPacket i parametri giusti
+                            vehicle_id = str(VehicleDict[StationID])
+                            certificate = certificates[vehicle_id]['AT']
+                            SecuredPacket = security.createSecurePacket(UnsecuredDataUpdate, certificate, vehicle_id, isCertificate, mtype)
                             new_pkt = EtherAndBasic + SecuredPacket
                 
                 except Exception as e:

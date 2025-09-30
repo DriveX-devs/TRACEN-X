@@ -4,3 +4,5 @@ pyproj
 asn1tools
 scapy
 python-qpid-proton
+cryptography
+requests
