@@ -10,4 +10,6 @@ PKIManager/certificates/responses/*
 PKIManager/certificates/credentials.json
 PKIManager/certificates/certificates.json
 
+*.DS_Store
+
 venv/

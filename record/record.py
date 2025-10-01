@@ -1,7 +1,7 @@
 import serial
 import argparse
 import signal
-from multiprocessing import Process, Event
+from multiprocessing import Process, Event, Barrier
 import os
 from pcap_utils import sniff_pkt
 from serial_utils import read_serial
@@ -74,6 +74,16 @@ def main():
     serial_process = None
     pcap_process = None
 
+    num_barriers = 0
+    if enable_serial:
+        num_barriers += 1
+    if enable_CAN:
+        num_barriers += 1
+    if enable_pcap:
+        num_barriers += 1
+    
+    barrier = Barrier(num_barriers) if num_barriers > 1 else None
+
     if enable_CAN:
         CAN_device = args.CAN_device
         CAN_filename = args.CAN_filename
@@ -83,7 +93,7 @@ def main():
         if CAN_log_file_source:
             assert os.path.exists(CAN_log_file_source), "CAN log file source does not exist"
         # Start thread to read CAN bus
-        candump_process = Process(target=read_CAN_bus, args=(stop_event, CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
+        candump_process = Process(target=read_CAN_bus, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
         # Set the thread as a daemon so it will be killed when the main thread exits
         candump_process.start()
 
@@ -102,13 +112,13 @@ def main():
             timeout=0
         )
         # Start the read serial function
-        serial_process = Process(target=read_serial, args=(stop_event, serial_filename, ser, end_time, real_time))
+        serial_process = Process(target=read_serial, args=(barrier, stop_event, serial_filename, ser, end_time, real_time))
         serial_process.start()
 
     if enable_pcap:
         interface = args.interface
         pcap_filename = args.pcap_filename
-        pcap_process = Process(target=sniff_pkt, args=(stop_event, pcap_filename, interface))
+        pcap_process = Process(target=sniff_pkt, args=(barrier, stop_event, pcap_filename, interface))
         pcap_process.start()
 
     try:
