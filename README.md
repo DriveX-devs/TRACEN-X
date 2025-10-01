@@ -10,6 +10,7 @@
 
 ## Authors
 - **Diego Gasco** - Politecnico di Torino - diego.gasco@polito.it (diego.gasco99@gmail.com)
+- **Giuseppe Perrone** - Politecnico di Torino - giuseppe.perrone@polito.it 
 - **Carlos Mateo Risma Carletti** - Politecnico di Torino - carlos.rismacarletti@polito.it
 - **Francesco Raviglione** - Politecnico di Torino - francesco.raviglione@polito.it
 - **Marco Rapelli** - Politecnico di Torino - marco.rapelli@polito.it
@@ -67,12 +68,16 @@ For consistency and to avoid unexpected permission issues, we conventionally run
 
 ### Python Packages
 - pyserial (for serial recording and reproducing)
+- python-can (for CAN device communication)
+- cantools (for CAN Bus decoding and encoding)
 - pyproj (for GUI mode)
-- nodejs (for GUI mode), version v12.22.9 or higher
-- cantools (for CAN Bus recording and reproducing)
 - asn1tools (for V2X messages parsing and encoding)
 - scapy (for V2X messages recording and reproducing)
 - python-qpid-proton (for V2X messages sending to an AMQP broker)
+- requests (for remote certificate and service interactions)
+- cryptography (for PKI operations and certificate handling)
+- tqdm (for progress bars during replay tasks)
+- nodejs (for GUI mode), version v12.22.9 or higher
 
 ## Installation
 
@@ -97,18 +102,8 @@ For consistency and to avoid unexpected permission issues, we conventionally run
    ```sh
     sudo pip install -r requirements
    ```
-   
-5. [Optional] Install the required Python packages:
-    ```sh
-    sudo pip install pyserial
-    sudo pip install cantools
-    sudo pip install pyproj
-    sudo pip install asn1tools
-    sudo pip install scapy
-    sudo pip install python-qpid-proton
-    ```
 
-6. Ensure `socat` is installed on your system:
+5. Ensure `socat` is installed on your system:
     ```sh
     sudo apt-get install socat
     ```
@@ -134,6 +129,12 @@ For consistency and to avoid unexpected permission issues, we conventionally run
     ```sh
     sudo apt install can-utils
     ```
+
+11. [Optional] Refresh security certificates when replaying with `--update-security`:
+    - When the flag is enabled, TRACEN-X requests fresh certificates whenever they are missing or expired and replaces the stored material automatically.
+    - Register the stations that must receive renewed credentials with the reference PKI (e.g., your C-ITS provider such as Eviden) before running the update so the enrollment process can be authorized.
+    - Update `PKIManager/certificates/credentials.json` so it lists the correct number of registered stations before starting the process; the enrollment service uses this metadata to issue the new certificates.
+    - The refreshed certificates are downloaded only when needed, keeping previously valid credentials unchanged.
 
 ## Usage
 
