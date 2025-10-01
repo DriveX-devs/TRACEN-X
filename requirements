@@ -1,6 +1,10 @@
-pyserial
-cantools
-pyproj
 asn1tools
-scapy
+cantools
+cryptography
+pyproj
+pyserial
+python-can
 python-qpid-proton
+requests
+scapy
+tqdm

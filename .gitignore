@@ -4,3 +4,10 @@ node_modules/
 *.Identifier
 *.attrs
 .idea/
+PKIManager/certificates/keys/*
+PKIManager/certificates/requests/*
+PKIManager/certificates/responses/*
+PKIManager/certificates/credentials.json
+PKIManager/certificates/certificates.json
+
+venv/
