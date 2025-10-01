@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 from cryptography.hazmat.backends import default_backend
-# ASN.1/OER: serve lo schema ASN.1 originale per generare i binding
+# ASN.1/OER: requires the original ASN.1 schema to generate the bindings
 from cryptography.hazmat.primitives.serialization import (
     load_pem_public_key, load_der_public_key,
     load_pem_private_key, load_der_private_key,
@@ -33,13 +33,13 @@ from dataclasses import dataclass
 @dataclass
 class GNpublicKey:
     """
-    Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
-    la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
-    - x_only: stringa esadecimale (32 byte) dell'ascissa X
-    - prefix_type: 2 se y è pari (0x02), 3 se y è dispari (0x03)
+    One-to-one replica of the C++ return object exposing
+    the compressed public key *without prefix* and the prefix type.
+    - x_only: 32-byte hexadecimal string of the X coordinate
+    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
     """
     pk: bytes = b""
-    prefix: str = ""  # 2 (y pari) oppure 3 (y dispari)
+    prefix: str = ""  # 2 (even y) or 3 (odd y)
 
 @dataclass
 class GNpsidSsp:
@@ -159,8 +159,8 @@ class ATManager:
             try:
                 with open(file_name, "wb") as file_out:
                     length = len(key)
-                    file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
-                    file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                    file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
+                    file_out.write(key.encode("utf-8"))  # Write the string
                     print("Pre Shared Key saved to binary file.")
             except Exception as e:
                 print(f"Error opening file for writing: {e}")
@@ -181,7 +181,7 @@ class ATManager:
         if len(compressed_key) != 32:
             print("Key must be 32 bytes long")
             return None
-        # Prefisso: 0x02 (y pari) o 0x03 (y dispari)
+        # Prefix: 0x02 (even y) or 0x03 (odd y)
         if compression == 2:
             pk_data = b'\x02'
         elif compression == 3:
@@ -194,7 +194,7 @@ class ATManager:
         if len(pk_data) != 33:
             print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
             return None
-        # Carica la chiave pubblica ECC da bytes compressi
+        # Load the ECC public key from compressed bytes
         try:
             evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(self.CURVE, pk_data)            
             return evp_pkey
@@ -367,7 +367,7 @@ class ATManager:
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
                 if ec_key is None:
                     return public_key
-                # Memorizza come chiave ephemeral
+                # Store as the ephemeral key
                 self.m_EPHecKey = ec_key
             else:
 
@@ -376,26 +376,26 @@ class ATManager:
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
                 if ec_key is None:
                     return public_key
-                # Memorizza come chiave principale
+                # Store as the primary key
                 self.m_ecKey = ec_key
 
-            # Estrae la parte pubblica e determina il prefisso (parità di y)
+            # Extract the public component and determine the prefix (y parity)
             pub_numbers = ec_key.public_key().public_numbers()
             
             x_bytes = pub_numbers.x.to_bytes(32, "big")
             y_is_even = (pub_numbers.y % 2) == 0
             prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'
 
-            # Estrae la parte pubblica in formato compresso
+            # Extract the public component in compressed format
             pub_key = ec_key.public_key()
             
-            # Ottieni la chiave compressa usando cryptography
+            # Obtain the compressed key using cryptography
             compressed_point = pub_key.public_bytes(
                 Encoding.X962, 
                 PublicFormat.CompressedPoint
             )
             
-            # Il primo byte è il prefisso (0x02 o 0x03), i successivi 32 sono la coordinata x
+            # The first byte is the prefix (0x02 or 0x03), the next 32 bytes are the x coordinate
             prefix_byte = compressed_point[0]
             x_bytes = compressed_point[1:33]
             
@@ -411,7 +411,7 @@ class ATManager:
     def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> dict | None:
 
         try:
-            # Controlli di input
+            # Input validation
             if not isinstance(hash, (bytes, bytearray)):
                 raise TypeError("hash_bytes deve essere bytes")
             if len(hash) != 32:
@@ -427,21 +427,21 @@ class ATManager:
         try:
             signMaterial = GNsignMaterial()
 
-            # Se signer_hex non è fornito, usa un byte array vuoto (comportamento "self")
+            # If signer_hex is not provided, use an empty byte array ("self" behavior)
             if signer_hex:
                 signer_bytes =signer_hex
             else:
                 signer_bytes = b''
 
-            # Calcola gli hash individuali
+            # Compute the individual hashes
             tbsData_hash = self.computeSHA256(tbsData)
             signer_hash = self.computeSHA256(signer_bytes)
 
-            # Concatena gli hash e calcola l'hash finale
+            # Concatenate the hashes and compute the final hash
             concatenatedHashes = tbsData_hash + signer_hash
             final_hash = self.computeSHA256(concatenatedHashes)
 
-            # Seleziona la chiave corretta
+            # Select the appropriate key
             if ephemeral:
                 if self.m_EPHecKey is None:
                     print("Ephemeral EC key not loaded", file=sys.stderr)
@@ -453,12 +453,12 @@ class ATManager:
                     return None
                 ec_key = self.m_ecKey
 
-            # Firma l'hash finale
+            # Sign the final hash
             signature = self.signHash(final_hash, ec_key)
             if signature is None:
-                return None # Errore già stampato da signHash
+                return None # Error already printed by signHash
 
-            # Estrai r e s e normalizzali a 32 byte
+            # Extract r and s and normalize them to 32 bytes
             r_int, s_int = decode_dss_signature(signature)
             
             signMaterial.r = r_int.to_bytes(32, byteorder='big')
@@ -472,7 +472,7 @@ class ATManager:
     
     @staticmethod
     def getCurrentTimestamp() -> int:
-        # microsecondi dall'epoch UNIX corrente
+        # Microseconds since the current UNIX epoch
         microseconds_since_epoch = time.time_ns() // 1000
 
         seconds_per_year = 365 * 24 * 60 * 60
@@ -487,14 +487,14 @@ class ATManager:
 
         seconds_since_epoch = int(time.time())
 
-        # Costanti come nel C++
+        # Constants aligned with the C++ implementation
         seconds_per_year = 365 * 24 * 60 * 60
         leap_seconds = 8 * 24 * 60 * 60
         epoch_difference_seconds = (34 * seconds_per_year) + leap_seconds
 
         tai_seconds_since_2004 = seconds_since_epoch - epoch_difference_seconds
 
-        # Emula il cast a uint32_t del C++ (wrap modulo 2^32)
+        # Emulates the uint32_t cast from the C++ code (wrap modulo 2^32)
         return tai_seconds_since_2004 & 0xFFFFFFFF
     
     def readIniFile(self, id) -> "IniAT":
@@ -706,7 +706,7 @@ class ATManager:
         # ---------- EtsiTs102941Data ----------------
         dataContentPayload2 = ['unsecuredData']
         dataPayload102 = {}
-        # TODO: verificare se va messo il version = 1
+        # TODO: verify whether version should be set to 1
         dataPayload102['version'] = 1
         dataContentPayload102 = ['authorizationRequest']
         # ---------- AT request-------------

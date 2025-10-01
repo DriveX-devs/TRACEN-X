@@ -25,10 +25,10 @@ def countCertificates(pcap_path, start_time= None, end_time= None):
             continue
         if end and pkt_time > end:
             break
-        data = raw(pkt)[HEADER_LENGTH:-TAIL_LENGTH]  # dati tra header e coda
-        security = False if data[:1] == b'\x11' else True  # controlla se il pacchetto è secured
+        data = raw(pkt)[HEADER_LENGTH:-TAIL_LENGTH]  # data between the header and tail
+        security = False if data[:1] == b'\x11' else True  # check if the packet is secured
         if not security:
-            continue  # salta i pacchetti non secured
+            continue  # skip unsecured packets
         if SEQUENCE in data:
             count += 1
             continue

@@ -25,13 +25,13 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 @dataclass
 class GNpublicKey:
     """
-    Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
-    la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
-    - x_only: stringa esadecimale (32 byte) dell'ascissa X
-    - prefix_type: 2 se y è pari (0x02), 3 se y è dispari (0x03)
+    One-to-one replica of the C++ return object exposing
+    the compressed public key *without prefix* and the prefix type.
+    - x_only: 32-byte hexadecimal string of the X coordinate
+    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
     """
     pk: bytes = b""
-    prefix: str = ""  # 2 (y pari) oppure 3 (y dispari)
+    prefix: str = ""  # 2 (even y) or 3 (odd y)
 
 @dataclass
 class GNpsidSsp:
@@ -228,7 +228,7 @@ class Security():
     def reconverECKeyPair(self, vehicle_id: int) -> GNpublicKey:
         ec_key = None
         try:
-            # TODO sistemare il percorso per fare in modo che punti ai file giusti
+            # TODO: adjust the path so it points to the correct files
             keys_folder = os.path.join(
                 self.project_root,
                 'PKIManager',
@@ -266,7 +266,7 @@ class Security():
     def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> dict | None:
 
         try:
-            # Controlli di input
+            # Input validation
             if not isinstance(hash, (bytes, bytearray)):
                 raise TypeError("hash_bytes deve essere bytes")
             if len(hash) != 32:
@@ -297,7 +297,7 @@ class Security():
 
     @staticmethod
     def getCurrentTimestamp() -> int:
-        # microsecondi dall'epoch UNIX corrente
+        # Microseconds since the current UNIX epoch
         microseconds_since_epoch = time.time_ns() // 1000
 
         seconds_per_year = 365 * 24 * 60 * 60
@@ -309,11 +309,11 @@ class Security():
     @staticmethod
     def getKeyFromCertificate(certificate_info: dict) -> tuple[str | None, bytes | None]:
         try:
-            # Se il certificato ha la struttura con 'tbs' e 'verifyKeyIndicator'
+            # If the certificate provides 'tbs' and 'verifyKeyIndicator'
             if "tbs" in certificate_info and "verifyKeyIndicator" in certificate_info["tbs"]:
                 key_dict = certificate_info["tbs"]["verifyKeyIndicator"]
             else:
-                # Altrimenti assume che certificate_info sia già il dict delle chiavi
+                # Otherwise assume certificate_info already stores the key dictionary
                 key_dict = certificate_info
 
             for field in [
@@ -370,6 +370,8 @@ class Security():
             ieeeContent[1]['signer'][1].append(certificate_decoded)
         else:
             certHash = self.computeSHA256(certificate_raw)
+            # last 8 bytes of the hash
+            certHash = certHash[-8:]
             ieeeContent[1]['signer'] = ('digest', certHash)
         
         tbs_encoded = self.encodeASN1('ToBeSignedData', tbs)
@@ -383,27 +385,11 @@ class Security():
         encoded = self.encodeASN1('Ieee1609Dot2Data', ieeeData)
         return encoded
 
-if __name__ == "__main__":
-    dummy_bytes = b"Hello, World!"
-    certificates = '/Users/giuseppe/Desktop/TRACENX/TRACEN-X/PKIManager/certificates/certificates.json'
-    import json
-    with open(certificates, 'r') as f:
-        certificates = json.load(f)
-    sec = Security()
-    encoded0 = sec.createSecurePacket(dummy_bytes, certificates, 0, False, 'CAM')
-    encoded1 = sec.createSecurePacket(dummy_bytes, certificates, 1, False, 'CAM')
-
-    print(encoded0==encoded1)
-
-
-
 
             
 
             
             
-
-
 
 
 

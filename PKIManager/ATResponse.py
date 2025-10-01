@@ -30,13 +30,13 @@ from .CRReader import CRRReader
 @dataclass
 class GNpublicKey:
     """
-    Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
-    la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
-    - x_only: stringa esadecimale (32 byte) dell'ascissa X
-    - prefix_type: 2 se y è pari (0x02), 3 se y è dispari (0x03)
+    One-to-one replica of the C++ return object exposing
+    the compressed public key *without prefix* and the prefix type.
+    - x_only: 32-byte hexadecimal string of the X coordinate
+    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
     """
     pk: bytes = b""
-    prefix: str = ""  # 2 (y pari) oppure 3 (y dispari)
+    prefix: str = ""  # 2 (even y) or 3 (odd y)
 
 @dataclass
 class GNpsidSsp:
@@ -140,7 +140,7 @@ class cPacket:
 class response:
     requestHash: str = ""
     response_code: int = 0
-    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: era GNecdsaNistP256
+    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: was GNecdsaNistP256
 
 
 class ATResponse:
@@ -198,8 +198,8 @@ class ATResponse:
                 os.makedirs(dir_path, exist_ok=True)
             with open(file_name, "wb") as file_out:
                 length = len(key)
-                file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
-                file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
+                file_out.write(key.encode("utf-8"))  # Write the string
                 print("Pre Shared Key saved to binary file.")
         except Exception as e:
             print(f"Error opening file for writing: {e}")
@@ -218,7 +218,7 @@ class ATResponse:
         if len(compressed_key) != 32:
             print("Key must be 32 bytes long")
             return None
-        # Prefisso: 0x02 (y pari) o 0x03 (y dispari)
+        # Prefix: 0x02 (even y) or 0x03 (odd y)
         if compression == 2:
             pk_data = b'\x02'
         elif compression == 3:
@@ -231,7 +231,7 @@ class ATResponse:
         if len(pk_data) != 33:
             print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
             return None
-        # Carica la chiave pubblica ECC da bytes compressi
+        # Load the ECC public key from compressed bytes
         try:
             evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(self.CURVE, pk_data)            
             return evp_pkey
@@ -452,7 +452,7 @@ class ATResponse:
 
     def signatureVerification(self, tbsData: bytes, rValue: GNecdsaNistP256, sValue: str, verifyKeyIndicator: GNecdsaNistP256, ini: IniAT) -> bool:
 
-        # Selezione della chiave pubblica dell'EA: preferisci forme utilizzabili (compressed/uncompressed)
+        # Select the EA public key preferring usable forms (compressed or uncompressed)
         EAPublicKey = None
         if verifyKeyIndicator.p256_compressed_y_0:
             EAPublicKey = self.loadCompressedPublicKey(verifyKeyIndicator.p256_compressed_y_0, 2)
@@ -460,7 +460,7 @@ class ATResponse:
             EAPublicKey = self.loadCompressedPublicKey(verifyKeyIndicator.p256_compressed_y_1, 3)
 
         elif verifyKeyIndicator.p256_x_only:
-            # x-only non è sufficiente per ricostruire la chiave pubblica (manca la parità di y)
+            # x-only is insufficient to reconstruct the public key (y parity is missing)
             print("verifyKeyIndicator contiene solo x-only: impossibile ricostruire la chiave pubblica per la verifica.")
             return False
         else:

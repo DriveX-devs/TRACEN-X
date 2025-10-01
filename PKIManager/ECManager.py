@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 from cryptography.hazmat.backends import default_backend
-# ASN.1/OER: serve lo schema ASN.1 originale per generare i binding
+# ASN.1/OER: requires the original ASN.1 schema to generate the bindings
 from cryptography.hazmat.primitives.serialization import (
     load_pem_public_key, load_der_public_key,
     load_pem_private_key, load_der_private_key,
@@ -41,18 +41,18 @@ class IniEC:
     bitmapSspEA: str = "UNKNOWN"
 
 
-# Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
-# la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
+# One-to-one replica of the C++ return object exposing
+# the compressed public key *without prefix* and the prefix type.
 @dataclass
 class GNpublicKey:
     """
-    Replica 1:1 dell'oggetto di ritorno usato in C++ per esporre
-    la chiave pubblica in forma compressa *senza prefisso* e il tipo di prefisso.
-    - x_only: stringa esadecimale (32 byte) dell'ascissa X
-    - prefix_type: 2 se y è pari (0x02), 3 se y è dispari (0x03)
+    One-to-one replica of the C++ return object exposing
+    the compressed public key *without prefix* and the prefix type.
+    - x_only: 32-byte hexadecimal string of the X coordinate
+    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
     """
     pk: bytes = b""
-    prefix: str = ""  # 2 (y pari) oppure 3 (y dispari)
+    prefix: str = ""  # 2 (even y) or 3 (odd y)
 
 @dataclass
 class GNpsidSsp:
@@ -108,27 +108,27 @@ class EncData:
 class ECManager:
     """ Request of certificates """
     def __init__(self):
-        self.ephemeral = False                # Flag per chiave effimera
-        self.m_ecKey = None                   # Chiave EC principale
-        self.m_EPHecKey = None                # Chiave EC effimera
-        self.request_result = ""              # Buffer per la richiesta generata
-        self.signedData_result = ""           # Buffer per i dati firmati
-        self.encode_result = ""               # Buffer per i dati codificati
+        self.ephemeral = False                # Flag for ephemeral key usage
+        self.m_ecKey = None                   # Primary EC key
+        self.m_EPHecKey = None                # Ephemeral EC key
+        self.request_result = ""              # Buffer for the generated request
+        self.signedData_result = ""           # Buffer for signed data
+        self.encode_result = ""               # Buffer for encoded data
         # ETSI/IEEE 1609.2 encrypted container expects protocolVersion=3 (EA rejects =1)
-        self.m_protocolversion = 3            # Versione protocollo
-        self.m_version = 3                    # Versione dati
-        self.m_recipientID = "D41845A1F71C356A" # ID destinatario (8 byte)
-        self.m_hashId = "sha256"              # Algoritmo di hash (SHA256)
-        self.m_psid = 623                     # PSID (identificatore servizio)
-        self.m_itsID = "4472697665580108"     # ITS ID (identificatore veicolo/dispositivo)
-        self.m_certFormat = 1                 # Formato certificato
-        self.m_hours = 168                    # Durata in ore (7 giorni)
-        self.m_bitmapSspEA = "01C0"           # Bitmap SSP per EA
+        self.m_protocolversion = 3            # Protocol version
+        self.m_version = 3                    # Data version
+        self.m_recipientID = "D41845A1F71C356A" # Recipient ID (8 bytes)
+        self.m_hashId = "sha256"              # Hash algorithm (SHA-256)
+        self.m_psid = 623                     # PSID (service identifier)
+        self.m_itsID = "4472697665580108"     # ITS ID (vehicle/device identifier)
+        self.m_certFormat = 1                 # Certificate format
+        self.m_hours = 168                    # Duration in hours (7 days)
+        self.m_bitmapSspEA = "01C0"           # SSP bitmap for the EA
 
         self.NONCE_LENGTH = 12
         self.AES_KEY_LENGTH = 16 # AES-128
         self.AES_CCM_TAG_LENGTH = 16
-        self.CURVE = ec.SECP256R1()           # Curva P-256
+        self.CURVE = ec.SECP256R1()           # P-256 curve
         
         self.path = os.path.abspath(os.path.dirname(__file__))
 
@@ -169,7 +169,7 @@ class ECManager:
         if len(compressed_key) != 32:
             print("Key must be 32 bytes long")
             return None
-        # Prefisso: 0x02 (y pari) o 0x03 (y dispari)
+        # Prefix: 0x02 (even y) or 0x03 (odd y)
         if compression == 2:
             pk_data = b'\x02'
         elif compression == 3:
@@ -182,7 +182,7 @@ class ECManager:
         if len(pk_data) != 33:
             print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
             return None
-        # Carica la chiave pubblica ECC da bytes compressi
+        # Load the ECC public key from compressed bytes
         try:
             curve = ec.SECP256R1() 
             evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(curve, pk_data)            
@@ -236,8 +236,8 @@ class ECManager:
                 os.makedirs(dir_path, exist_ok=True)
             with open(file_name, "wb") as file_out:
                 length = len(key)
-                file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
-                file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
+                file_out.write(key.encode("utf-8"))  # Write the string
                 print("Pre Shared Key saved to binary file.")
         except Exception as e:
             print(f"Error opening file for writing: {e}")
@@ -409,19 +409,19 @@ class ECManager:
             print("Loaded public key is not an EC key", file=sys.stderr)
             return None
 
-        # --- Step 4: verifica la curva (tipicamente P-256)
+        # --- Step 4: verify the curve (typically P-256)
         if not isinstance(pkey.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
             print("EC curve mismatch or unsupported curve", file=sys.stderr)
             return None
 
-        # --- Step 5: verifica che la pubblica corrisponda alla privata
+        # --- Step 5: ensure the public key matches the private key
         priv_pub_numbers = pkey.public_key().public_numbers()
         loaded_pub_numbers = pub_key.public_numbers()
         if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
             print("Public key does not match the private key", file=sys.stderr)
             return None
 
-        # Tutto ok: restituiamo la chiave privata (la sua parte pubblica è già consistente)
+        # All good: return the private key (its public component is consistent)
         return pkey
 
 
@@ -453,26 +453,26 @@ class ECManager:
                 ec_key = self.loadECKeyFromRFC5480(private_key_rfc, public_key_rfc)
                 if ec_key is None:
                     return public_key
-                # Memorizza come chiave principale
+                # Store as the primary key
                 self.m_ecKey = ec_key
 
-            # Estrae la parte pubblica e determina il prefisso (parità di y)
+            # Extract the public component and determine the prefix (y parity)
             pub_numbers = ec_key.public_key().public_numbers()
-             
+            
             x_bytes = pub_numbers.x.to_bytes(32, "big")
             y_is_even = (pub_numbers.y % 2) == 0
-            prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'  # 0x02 (y pari) oppure 0x03 (y dispari)
+            prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'  # 0x02 (even y) or 0x03 (odd y)
 
-            # Estrae la parte pubblica in formato compresso
+            # Extract the public component in compressed format
             pub_key = ec_key.public_key()
             
-            # Ottieni la chiave compressa usando cryptography
+            # Obtain the compressed key using cryptography
             compressed_point = pub_key.public_bytes(
                 Encoding.X962, 
                 PublicFormat.CompressedPoint
             )
             
-            # Il primo byte è il prefisso (0x02 o 0x03), i successivi 32 sono la coordinata x
+            # The first byte is the prefix (0x02 or 0x03), the next 32 bytes are the x coordinate
             prefix_byte = compressed_point[0]
             x_bytes = compressed_point[1:33]
             
@@ -488,7 +488,7 @@ class ECManager:
     def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> dict | None:
 
         try:
-            # Controlli di input
+            # Input validation
             if not isinstance(hash, (bytes, bytearray)):
                 raise TypeError("hash_bytes deve essere bytes")
             if len(hash) != 32:
@@ -538,7 +538,7 @@ class ECManager:
 
     @staticmethod
     def getCurrentTimestamp() -> int:
-        # microsecondi dall'epoch UNIX corrente
+        # Microseconds since the current UNIX epoch
         microseconds_since_epoch = time.time_ns() // 1000
 
         seconds_per_year = 365 * 24 * 60 * 60
@@ -553,14 +553,14 @@ class ECManager:
 
         seconds_since_epoch = int(time.time())
 
-        # Costanti come nel C++
+        # Constants aligned with the C++ implementation
         seconds_per_year = 365 * 24 * 60 * 60
         leap_seconds = 8 * 24 * 60 * 60
         epoch_difference_seconds = (34 * seconds_per_year) + leap_seconds
 
         tai_seconds_since_2004 = seconds_since_epoch - epoch_difference_seconds
 
-        # Emula il cast a uint32_t del C++ (wrap modulo 2^32)
+        # Emulates the uint32_t cast from the C++ code (wrap modulo 2^32)
         return tai_seconds_since_2004 & 0xFFFFFFFF
 
     def regeneratePEM(self, id) -> None:
@@ -625,7 +625,7 @@ class ECManager:
         EAcertificate = ini.eaCert1 + ini.eaCert2 + ini.eaCert3
         binaryCert = bytes.fromhex(EAcertificate)
 
-        # TODO trovare un posto migliore per caricare i certificati ASN.1
+        # TODO: find a better place to load the ASN.1 certificates
         asn_folder = os.path.join("data", "asn", "security")
         asn_files = glob.glob(os.path.join(asn_folder, "*.asn"))
         if not asn_files:
@@ -968,5 +968,3 @@ if __name__ == "__main__":
         print("Certificate retrieved successfully:")
     else:
         print("Failed to retrieve certificate.")
-
-

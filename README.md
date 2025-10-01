@@ -171,7 +171,6 @@ sudo python merge_traces/union.py --csv-files trace1.csv trace2.csv trace3.csv -
 Follow the instructions inside the script to select the desired options.
 
 ## Work in Progress
-- [ ] Enable V2X messages reproduction with updated security certificates
 - [ ] Enable the reliable usage of baud rates higher than 115200
 - [ ] Enable GUI for V2X messages received, VAMs and DENMs
 - [X] Enable GUI for V2X messages received, CAMs and CPMs (objects perceived)
@@ -184,3 +183,4 @@ Follow the instructions inside the script to select the desired options.
 - [X] Serial Device recording and reproduction
 - [X] V2X messages recording and reproduction
 - [X] CSV traces creation and merging
+- [X] Enable V2X messages reproduction with updated security certificates

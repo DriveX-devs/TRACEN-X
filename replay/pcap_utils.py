@@ -143,7 +143,7 @@ def get_timestamp_ms(purpose: str) -> int:
     return -1
 
 
-def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str, certificates: dict):
+def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str, certificates: dict, update_security: bool) -> None:
     """
     Sends packets from a pcap file to a network interface within a given time window.
 
@@ -162,12 +162,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     
     security = Security()
     LastAssigned = 0
-    MAX_CERTIFICATES = 5
-
     VehicleDict = {}
-    # TODO
-    # Load the certificates
-    # associate each certificate to a vehicle ID (0, 1, 2, ..., MAX_CERTIFICATES-1)
 
     if enable_amqp:
         amqp_sender = AMQPSender(amqp_server_ip, amqp_server_port, amqp_topic)
@@ -222,14 +217,14 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                     # Take the rest ot the packet
                     data = raw(pkt)[ETHER_LENGTH:]
                     # Check if the security layer is active
-                    security = False if data[:1] == b'\x11' else True
+                    security_enabled = False if data[:1] == b'\x11' else True
                     # Set the fields for pkt reconstruction to None to check if they will be filled properly
                     facilities = None
                     port = None
                     btp = None
                     new_geonet = None
                     
-                    if not security:
+                    if not security_enabled:
                         # Packet without the security layer
                         # Extract the GeoNet and calculate the new timestamp
                         geonet = data[:GEONET_LENGTH]
@@ -262,27 +257,27 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             TSPOS = 16
                             CurrentTime = get_timestamp_ms(purpose="GeoNet")
                             assert CurrentTime > 0, "Error in time calculation"
-                            CurrentTime = CurrentTime.to_bytes(4, byteorder="big", signed=False)
-                            UnsecuredDataUpdate = UnsecuredData[:TSPOS] + CurrentTime + UnsecuredData[TSPOS+4:]
+                            CurrentTime_bytes = CurrentTime.to_bytes(4, byteorder="big", signed=False)
                         elif Htype == 64:  # GeoScoped
                             # GeoScoped case DENMs
                             TSPOS = 20
                             CurrentTime = get_timestamp_ms(purpose="GeoNet")
                             assert CurrentTime > 0, "Error in time calculation"
-                            CurrentTime = CurrentTime.to_bytes(4, byteorder="big", signed=False)
-                            UnsecuredDataUpdate = UnsecuredData[:TSPOS] + current_timestamp + UnsecuredData[TSPOS+4:]
+                            CurrentTime_bytes = CurrentTime.to_bytes(4, byteorder="big", signed=False)
                         else:
                             raise ValueError(f"Unknown Header Type {Htype}")
+                        UnsecuredDataUpdate = bytearray(UnsecuredData)
+                        UnsecuredDataUpdate[TSPOS:TSPOS+4] = CurrentTime_bytes
                         # Search for the BTP
-                        plength = int.from_bytes(UnsecuredDataUpdate[4:6],  byteorder="big")
-                        payload = UnsecuredDataUpdate[-plength:]
+                        plength = int.from_bytes(UnsecuredDataUpdate[4:6], byteorder="big")
+                        payload_offset = len(UnsecuredDataUpdate) - plength
+                        payload = UnsecuredDataUpdate[payload_offset:]
+                        new_geonet = bytes(UnsecuredDataUpdate[:payload_offset])
                         btp = payload[:4]
                         port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
-                        facilities = payload[4: -1]
+                        facilities = payload[4:]
 
                     if not new_geonet or not btp or not facilities or not port:
-                        # From both cases (with and without security layer), we need some basic information
-                        # Otherwise, the packet is treated as not known and will be normally sent
                         new_pkt = raw(pkt)
                     else:
                         mex_encoded = None
@@ -314,7 +309,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
                             
-                            if security:
+                            if security_enabled and update_security:
                                 StationID = cpm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -355,7 +350,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
 
                             mex_encoded = CAM.encode("CAM", cam)
-                            if security:
+                            if security_enabled and update_security:
                                 StationID = cam['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -402,7 +397,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
                             
-                            if security:
+                            if security_enabled and update_security:
                                 StationID = denm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -416,16 +411,24 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         
                         if ether_part and raw_part:
                             new_pkt = ether_part + raw_part
-                        if security:
+                        if security_enabled:
                             # rebuild the security layer
-                            NewPayload = btp + mex_encoded
-                            UnsecuredDataUpdate[-plength:] = NewPayload
-                            # TODO: dare a securedPacket i parametri giusti
-                            vehicle_id = str(VehicleDict[StationID])
-                            certificate = certificates[vehicle_id]['AT']
-                            SecuredPacket = security.createSecurePacket(UnsecuredDataUpdate, certificate, vehicle_id, isCertificate, mtype)
-                            new_pkt = EtherAndBasic + SecuredPacket
-                
+                            new_payload = btp + mex_encoded
+                            UnsecuredDataUpdate[payload_offset:] = new_payload
+                            if update_security:
+                                if not certificates:
+                                    raise ValueError("Certificates are required to rebuild secured packets")
+                                vehicle_idx = VehicleDict[StationID] % len(certificates)
+                                vehicle_key = str(vehicle_idx)
+                                if vehicle_key not in certificates or 'AT' not in certificates[vehicle_key]:
+                                    raise KeyError(f"Missing AT certificate for vehicle {vehicle_key}")
+                                certificate = certificates[vehicle_key]['AT']
+                                SecuredPacket = security.createSecurePacket(bytes(UnsecuredDataUpdate), certificate, vehicle_idx, isCertificate, mtype)
+                                new_pkt = EtherAndBasic + SecuredPacket
+                            if not update_security:
+                                DecodedPacket['content'][1]['tbsData']['payload']['data']['content'][1] = bytes(UnsecuredDataUpdate)
+                                new_pkt = EtherAndBasic + SECURITY.encode("Ieee1609Dot2Data", DecodedPacket)
+
                 except Exception as e:
                     print(f"Error while processing packet {i}: {e}")
                     continue
@@ -436,8 +439,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
             if new_pcap != "":
                 wrpcap(new_pcap, new_pkt, append=True)
-
-            if sock is not None:
+            if sock:
                 try:
                     sock.send(new_pkt)
                     if enable_amqp:
@@ -450,7 +452,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                     print(f"Error: {e}")
     except Exception as e:
         print(f"Error: {e}")
-    
     finally:
         print(f"Pcap reproduction on interface {interface} terminated")
         if enable_amqp:
@@ -458,9 +459,3 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
             amqp_thread.join()
         if sock is not None:
             sock.close()
-
-
-
-#write_pcap(input_filename="/Users/giuseppe/Desktop/TRACEN-x/cattura_MIS_80211p.pcapng", interface="en0", start_time=0, end_time=60, update_datetime=False, new_pcap="new_pcap.pcap")
-
-#write_pcap(stop_event=None, input_filename="cattura_MIS_80211p.pcapng", interface="en0", start_time=None, end_time=60, update_datetime=True, new_pcap="new_pcap.pcap", enable_amqp=False, amqp_server_ip="", amqp_server_port=0, amqp_topic="")

@@ -110,7 +110,7 @@ class cPacket:
 class response:
     requestHash: str = ""
     response_code: int = 0
-    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: era GNecdsaNistP256
+    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: was GNecdsaNistP256
 
 class ECResponse:
     def __init__(self):
@@ -125,7 +125,7 @@ class ECResponse:
         self.NONCE_LENGTH = 12
         self.AES_KEY_LENGTH = 16
         self.AES_CCM_TAG_LENGTH = 16
-        self.CURVE = ec.SECP256R1()           # Curva P-256
+        self.CURVE = ec.SECP256R1()           # P-256 curve
         
         self.path = os.path.abspath(os.path.dirname(__file__))
 
@@ -156,8 +156,8 @@ class ECResponse:
                 os.makedirs(dir_path, exist_ok=True)
             with open(file_name, "wb") as file_out:
                 length = len(key)
-                file_out.write(length.to_bytes(8, byteorder="little"))  # Scrivi la lunghezza (size_t, 8 byte)
-                file_out.write(key.encode("utf-8"))  # Scrivi la stringa
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
+                file_out.write(key.encode("utf-8"))  # Write the string
                 print("Pre Shared Key saved to binary file.")
         except Exception as e:
             print(f"Error opening file for writing: {e}")
@@ -174,29 +174,29 @@ class ECResponse:
     
     @staticmethod
     def loadCompressedPublicKey(compressed_key: bytes, compression: int):
-        # Decodifica la chiave compressa da esadecimale a bytes
+        # Decode the compressed key from hex to bytes
         if len(compressed_key) != 32:
             print("La chiave compressa deve essere di 32 byte")
             return None
 
-        # Aggiunge il prefisso per compressed_y_0 o compressed_y_1
+        # Add the prefix for compressed_y_0 or compressed_y_1
         if compression == 2:
-            pk_data = b'\x02'  # Prefisso per y pari
+            pk_data = b'\x02'  # Prefix for even y
         elif compression == 3:
-            pk_data = b'\x03'  # Prefisso per y dispari
+            pk_data = b'\x03'  # Prefix for odd y
         else:
             print("Compression deve essere 2 o 3")
             return None
 
-        # Aggiunge il contenuto di compressed_key_hex dopo il prefisso
+        # Append the compressed key bytes after the prefix
         pk_data = pk_data + compressed_key
 
-        # Verifica della lunghezza di pk_data ora dovrebbe essere 33 byte (1 byte di prefisso + 32 byte della chiave)
+        # Verify pk_data length is now 33 bytes (1 prefix byte + 32 key bytes)
         if len(pk_data) != 33:
             print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
             return None
 
-        # Carica la chiave pubblica ECC da bytes compressi
+        # Load the ECC public key from compressed bytes
         try:
             public_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), pk_data)
             return public_key
@@ -244,8 +244,7 @@ class ECResponse:
         return decryptedMessage
     
     def doDecryption(self, ciphertextWithTag: bytes, nonce: bytes, id) -> bytes:
-        # Ricarica SEMPRE la chiave per l'ID specifico, invece di riutilizzare 
-        # una chiave precedentemente caricata
+        # Always reload the key for the specific ID instead of reusing an existing one
         aesKeyPath = os.path.join(self.path, 'certificates', 'keys',f'ITS_{id}', 'pskEC.bin')
         self.m_aesKey = self.retrieveStringFromFile(aesKeyPath)
         
@@ -260,14 +259,14 @@ class ECResponse:
     def loadECKeyFromFile(self, private_key_file: str, public_key_file: str, password: bytes | None = None):
     
         try:
-            # Leggi i bytes dei file
+            # Read the file bytes
             with open(private_key_file, 'rb') as f:
                 priv_bytes = f.read()
         except Exception as e:
             print("Error opening file to load private key", file=sys.stderr)
             self.print_error(e)
             return None
-        # Prova a caricare la chiave privata sia come PEM che come DER
+        # Try loading the private key both as PEM and DER
         priv_key = None
         try:
             priv_key = load_pem_private_key(priv_bytes, password=password)
@@ -295,7 +294,7 @@ class ECResponse:
             print("Loaded public key is not an EC key", file=sys.stderr)
             return None
 
-        # Verifica che la curva sia quella attesa (di solito P-256)
+        # Verify the curve is the expected one (usually P-256)
         if not isinstance(priv_key.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
             print("EC curve mismatch or unsupported curve", file=sys.stderr)
             return None
@@ -394,7 +393,7 @@ class ECResponse:
             return GNpublicKey()  # Empty instance
 
     def signatureVerification(self, tbsData: bytes, rValue: GNecdsaNistP256, sValue: str, verifyKeyIndicator: GNecdsaNistP256) -> bool:
-        # Selezione della chiave pubblica dell'EA: preferisci forme utilizzabili (compressed/uncompressed)
+        # Select the EA public key preferring usable forms (compressed or uncompressed)
         EAPublicKey = None
         if verifyKeyIndicator.p256_compressed_y_0:
             EAPublicKey = self.loadCompressedPublicKey(verifyKeyIndicator.p256_compressed_y_0, 2)
@@ -406,7 +405,7 @@ class ECResponse:
                 verifyKeyIndicator.p256_uncompressed_y
             )
         elif verifyKeyIndicator.p256_x_only:
-            # x-only non è sufficiente per ricostruire la chiave pubblica (manca la parità di y)
+            # x-only is insufficient to reconstruct the public key (y parity is missing)
             print("verifyKeyIndicator contiene solo x-only: impossibile ricostruire la chiave pubblica per la verifica.")
             return False
         else:
@@ -528,7 +527,7 @@ class ECResponse:
 
         duration = certData_decoded['toBeSigned']['validityPeriod']['duration'][0]
         
-        if duration == 'years': # nel decode di asn1tools non è in hours ma in years
+        if duration == 'years': # asn1tools decodes this value using years instead of hours
             newCert.tbs.validityPeriod_duration = certData_decoded['toBeSigned']['validityPeriod']['duration'][1]
         # AppPermissions
         for perm in certData_decoded['toBeSigned']['appPermissions']:
@@ -662,7 +661,7 @@ class ECResponse:
                     sPack.content.signData.rSig.p256_uncompressed_y = signDec['signature'][1]['rSig'][2]
                 sPack.content.signData.signature_sSig = signDec['signature'][1]['sSig']
 
-                # Verifica che il signer digest corrisponda all'HashedId8 del certificato EA usato
+                # Ensure the signer digest matches the HashedId8 of the EA certificate in use
                 signer_hid8 = sPack.content.signData.signer_digest
                 ea_cert_hid8 = self.hashed_id8(binaryCert)
                 if signer_hid8 != ea_cert_hid8:
@@ -748,7 +747,7 @@ class ECResponse:
 
                 ec_hex = asn1_modules.encode('CertificateBase',certDecoded)
                 self.m_ecBytesStr = ec_hex
-                # bisogna salvare nel file il certificato e la data di scadenza
+                # Save the certificate and expiration date to the file
                 CPath = os.path.join(self.path, 'certificates','certificates.json')
 
                 certDict = {

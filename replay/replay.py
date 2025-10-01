@@ -99,6 +99,8 @@ def main():
     args.add_argument("--amqp-server-ip", type=str, help="The IP address of the AMQP server. Default is 127.0.0.1", default="127.0.0.1")
     args.add_argument("--amqp-server-port", type=int, help="The Port of the AMQP server. Default is 5867", default=5867)
     args.add_argument("--amqp-topic", type=str, help="The Topic of the AMQP server. Default is tracenx", default="tracenx")
+    args.add_argument("--max-certificates", type=int, help="The maximum number of certificates to manage. Default is 0, which means it will not limit the number of certificates.", default=0)
+    args.add_argument("--update-security", action="store_true", help="If set, the script will check and update the security certificates. Default is False", default=False)
 
     args = args.parse_args()
     # TODO: if enable pcap, read the pcap file and count the certificates and ask
@@ -144,6 +146,8 @@ def main():
     amqp_server_ip = args.amqp_server_ip
     amqp_server_port = args.amqp_server_port
     amqp_topic = args.amqp_topic
+    maxCertificates = args.max_certificates
+    update_security = args.update_security
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
     CERT_PATH = Path(__file__).resolve().parents[1] / "PKIManager" / "certificates" / "certificates.json"
@@ -163,10 +167,10 @@ def main():
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
 
-    if enable_pcap and update_datetime:
+    if enable_pcap and update_datetime and update_security:
         certificates = countCertificates(pcap_filename, args.start_time, args.end_time)
         print(f"The pcap file contains {certificates} certificates")
-        active_certificates = count_active_certificates(CERT_PATH)
+        active_certificates = count_active_certificates(CERT_PATH, maxCertificates=maxCertificates)
         print(active_certificates)
         for key in active_certificates.keys():
             ECisValid, ATisValid = active_certificates[key]
@@ -191,6 +195,7 @@ def main():
                 atManager.regeneratePEM(key)
                 atManager.createRequest(key)
                 atManager.sendPOST(key)
+                atResponse.getATResponse(key)
 
             elif ECisValid and not ATisValid:
                 response = ECResponse()
@@ -285,7 +290,7 @@ def main():
     if enable_pcap:
         
         assert os.path.exists(pcap_filename)
-        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates))
+        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
         pcap_process.start()
 
     try:
@@ -320,3 +325,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # python3 replay/replay.py --enable-pcap --pcap-filename /home/giuseppe/Desktop/TRACEN-X/cattura_MIS_80211p.pcapng --start-time 0 --end-time 60 --new-pcap-file new6.pcapng --update-datetime

@@ -3,18 +3,17 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
 
-MAX_CERTIFICATES = 2
 def getCurrentTimestamp32() -> int:
     seconds_since_epoch = int(time.time())
 
-    # Costanti come nel C++
+    # Constants aligned with the C++ implementation
     seconds_per_year = 365 * 24 * 60 * 60
     leap_seconds = 8 * 24 * 60 * 60
     epoch_difference_seconds = (34 * seconds_per_year) + leap_seconds
 
     tai_seconds_since_2004 = seconds_since_epoch - epoch_difference_seconds
 
-    # Emula il cast a uint32_t del C++ (wrap modulo 2^32)
+    # Emulates the uint32_t cast from the C++ code (wrap modulo 2^32)
     return tai_seconds_since_2004 & 0xFFFFFFFF
 
 
@@ -42,18 +41,24 @@ def _evaluate_certificate(certificate_data: Any, reference_time: int) -> Tuple[b
     return False, False
 
 
-def count_active_certificates(certificates_path: Union[str, Path] = "PKIManager/certificates/certificates.json") -> Dict[str, Tuple[bool, bool]]:
+def count_active_certificates(certificates_path: Union[str, Path] = "PKIManager/certificates/certificates.json", maxCertificates: int = 0) -> Dict[str, Tuple[bool, bool]]:
     """Cleanup expired certificates and report EC/AT validity per vehicle."""
 
     path = Path(certificates_path)
     if not path.exists():
         raise FileNotFoundError(f"Certificates file not found: {path}")
 
-    with path.open("r", encoding="utf-8") as certificates_file:
-        certificates = json.load(certificates_file)
+    try:
+        with path.open("r", encoding="utf-8") as certificates_file:
+            certificates = json.load(certificates_file)
+    except json.JSONDecodeError:
+        certificates = {}
     
     if not certificates:
-        return {key : (False, False) for key in range(MAX_CERTIFICATES)}
+        if maxCertificates > 0:
+            return {key : (False, False) for key in range(maxCertificates)}
+        else:
+            raise ValueError("No MaxCertificates provided, and no certificates found.")
         
 
     now = getCurrentTimestamp32()
@@ -110,9 +115,3 @@ def count_active_certificates(certificates_path: Union[str, Path] = "PKIManager/
             json.dump(certificates, certificates_file, indent=4)
 
     return validity_by_vehicle
-
-
-if __name__ == "__main__":
-
-    path = "/Users/giuseppe/Desktop/TRACENX/TRACEN-X/PKIManager/certificates/certificates.json"
-    print(count_active_certificates(path))
