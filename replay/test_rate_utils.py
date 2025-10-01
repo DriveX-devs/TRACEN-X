@@ -37,7 +37,7 @@ def print_test_rate_stats(average_update_time: float, average_update_time_filter
     print("UBX-NAV-STATUS present:", UBX_NAV_STATUS_PRESENT)
 
 
-def test_rate(stop_event: Any, filename: str, start_time: int, end_time: int):
+def test_rate(barrier: Any, stop_event: Any, filename: str, start_time: int, end_time: int):
     """
     Test rate function that calculates the update rate of the GNSS messages.
 
@@ -80,6 +80,9 @@ def test_rate(stop_event: Any, filename: str, start_time: int, end_time: int):
     prev_latitude_deg = -8000
     prev_longitude_deg = -8000
     prev_speed = -8000
+
+    if barrier:
+        barrier.wait()
 
     startup_time = time.time() * 1e6
     for d in data:

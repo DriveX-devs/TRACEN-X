@@ -5,7 +5,7 @@ import json
 import sys
 from tqdm import tqdm
 from pathlib import Path
-from multiprocessing import Process, Event
+from multiprocessing import Process, Event, Barrier
 
 from visualizer import Visualizer
 from csv_conversion_utils import csv_conversion
@@ -103,7 +103,6 @@ def main():
     args.add_argument("--update-security", action="store_true", help="If set, the script will check and update the security certificates. Default is False", default=False)
 
     args = args.parse_args()
-    # TODO: if enable pcap, read the pcap file and count the certificates and ask
     
     serial = args.enable_serial
     serial_filename = args.serial_filename
@@ -153,6 +152,23 @@ def main():
     CERT_PATH = Path(__file__).resolve().parents[1] / "PKIManager" / "certificates" / "certificates.json"
     if start_time and end_time:
         assert end_time > start_time
+    
+    num_barriers = 0
+    if serial:
+        num_barriers += 1
+    if CAN:
+        num_barriers += 1
+    if enable_pcap > 0:
+        num_barriers += 1
+    if test_rate_enabled > 0:
+        num_barriers += 1
+    if csv > 0:
+        num_barriers += 1
+    if enable_serial_gui > 0:
+        num_barriers += 1
+
+    # Initialize a barrier if more than one process needs to be synchronized
+    barrier = Barrier(num_barriers) if num_barriers > 1 else None
 
     visualizer = None
     fifo_path = None
@@ -230,7 +246,7 @@ def main():
     if serial:
         assert os.path.exists(serial_filename), "The file does not exist"
         serial_process = Process(
-            target=write_serial, args=(stop_event, server_device, client_device, baudrate, serial_filename, start_time, end_time)
+            target=write_serial, args=(barrier, stop_event, server_device, client_device, baudrate, serial_filename, start_time, end_time)
         )
         serial_process.start()
 
@@ -249,20 +265,24 @@ def main():
             os.mkfifo(fifo_path)
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
         if enable_CAN_gui and not enable_pcap_gui:
+            # GUI enabled for serial and CAN
             gui_process = Process(
-                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
+                target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
             )
         elif enable_CAN_gui and enable_pcap_gui:
+            # GUI enabled for serial, CAN and pcap
             gui_process = Process(
-                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db, pcap_filename)
+                target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db, pcap_filename)
             )
         elif enable_pcap_gui:
+            # GUI enabled for serial and pcap
             gui_process = Process(
-                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, None, None, pcap_filename)
+                target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, None, None, pcap_filename)
             )
         else:
+            # GUI enabled only for serial
             gui_process = Process(
-                target=serial_gui, args=(stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
+                target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
             )
 
         gui_process.start()
@@ -270,12 +290,12 @@ def main():
     if CAN:
         assert os.path.exists(CAN_filename), "The file does not exist"
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
-        can_process = Process(target=write_CAN, args=(stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
+        can_process = Process(target=write_CAN, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
         can_process.start()
 
     if test_rate_enabled:
         assert os.path.exists(serial_filename), "The file does not exist"
-        test_rate_process = Process(target=test_rate, args=(stop_event, serial_filename, start_time, end_time))
+        test_rate_process = Process(target=test_rate, args=(barrier, stop_event, serial_filename, start_time, end_time))
         test_rate_process.start()
     
     if csv:
@@ -286,13 +306,13 @@ def main():
         agent_id = input("Insert the agent id: ")
         assert agent_id, "The agent id must be inserted"
         csv_process = Process(
-            target=csv_conversion, args=(stop_event, serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
+            target=csv_conversion, args=(barrier, stop_event, serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
         )
         csv_process.start()
 
     if enable_pcap:
         assert os.path.exists(pcap_filename)
-        pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
+        pcap_process = Process(target=write_pcap, args=(barrier, stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
         pcap_process.start()
 
     try:

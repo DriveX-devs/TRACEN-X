@@ -5,7 +5,7 @@ import time
 from decoded_messages import DecodedMessage
 from typing import Any
 
-def csv_conversion(stop_event: Any, input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
+def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
     """
     CSV function to store in a csv file the kinematic of the agent over the capture.
 
@@ -49,6 +49,9 @@ def csv_conversion(stop_event: Any, input_filename: str, csv_filename: str, csv_
     last_speed_time = None
     acc = None
     last_heading = None
+
+    if barrier:
+        barrier.wait()
 
     for d in data:
         last_time = d["timestamp"]

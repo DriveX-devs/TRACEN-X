@@ -21,19 +21,6 @@ BTP_LOW = 40
 BTP_HIGH = 44
 BTP_PORT_HIGH = 2
 
-# Security packet constants
-ETH_SRC_ADDR = 6
-BTP_PAD = 4
-BTPS = {
-    b"\x07\xd2\x00\x00": "DENM",
-    b"\x07\xd1\x00\x00": "CAM",
-    b"\x07\xd9\x00\x00": "CPM",
-    b"\x07\xe2\x00\x00": "VAM",
-}
-SECURITY_TAIL = 66
-AFTER_TIMESTAMP_PAD_SHB = 20
-AFTER_TIMESTAMP_PAD_GEOSCOPED = 32
-
 # General facility constants
 TIME_SHIFT = 1072915200000
 TS_MAX1 = 4294967296
@@ -41,19 +28,11 @@ MODULO_WRAP = 4398046511103
 MODULO_CAM_VAM_DENM = 65536
 PURPOSES = ["GeoNet", "CPM", "CAM", "VAM", "DENM"]
 
-# Load the ASN1 files before starting the process
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
 denm_asn = "./data/asn/DENM-all-old.asn"
 security_folder = "./data/asn/security/"
-CPM = asn.compile_files(cpm_asn, "uper")
-VAM = asn.compile_files(vam_asn, "uper")
-CAM = asn.compile_files(cam_asn, "uper")
-DENM = asn.compile_files(denm_asn, "uper")
-asn_files = glob.glob(os.path.join(security_folder, "*.asn"))
-SECURITY = asn.compile_files(asn_files, 'oer')
-
 
 class AMQPSender(MessagingHandler):
     def __init__(self, server, port, topic):
@@ -96,9 +75,15 @@ class AMQPSender(MessagingHandler):
         self.container.stop()
 
 
-def compute_properties():
-    # TODO
-    return {}
+def compute_properties(security_enabled: bool = None, port: int = None, StationID: int = None) -> dict:
+    properties = {
+        "security": "unsecured" if security_enabled is False else "secured" if security_enabled is True else "unknown",
+        "sent_to_broker_at": int(time.time() * 1e3),
+        "purpose": "V2X message",
+        "destination_port": port if port is not None else "unknown",
+        "station_id": StationID if StationID is not None else "unknown" 
+    }
+    return properties
 
 
 def get_timestamp_ms(purpose: str) -> int:
@@ -143,7 +128,7 @@ def get_timestamp_ms(purpose: str) -> int:
     return -1
 
 
-def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str, certificates: dict, update_security: bool) -> None:
+def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: str, start_time: int, end_time: int, update_datetime: bool, new_pcap: str, enable_amqp: bool, amqp_server_ip: str, amqp_server_port: int, amqp_topic: str, certificates: dict, update_security: bool) -> None:
     """
     Sends packets from a pcap file to a network interface within a given time window.
 
@@ -159,6 +144,13 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
     - amqp_server_port (str): Port of the AMQP server
     - amqp_topic (str): Topic to publish messages to on the AMQP server
     """
+
+    CPM = asn.compile_files(cpm_asn, "uper")
+    VAM = asn.compile_files(vam_asn, "uper")
+    CAM = asn.compile_files(cam_asn, "uper")
+    DENM = asn.compile_files(denm_asn, "uper")
+    asn_files = glob.glob(os.path.join(security_folder, "*.asn"))
+    SECURITY = asn.compile_files(asn_files, 'oer')
     
     security = Security()
     LastAssigned = 0
@@ -185,6 +177,10 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
         print("Warning: raw socket unavailable, packets will not be sent on the interface.")
 
     base_ts = pcap[0].time  # epoch time in seconds
+
+    if barrier:
+        barrier.wait()
+    
     startup_time = time.time() * 1e6
     try:
         for i, pkt in enumerate(pcap):
@@ -209,6 +205,9 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                 pass
 
             new_pkt = None
+            port = None
+            security_enabled = None
+            StationID = None
             if update_datetime:
                 raw_part = None
                 try:
@@ -291,6 +290,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             should_update_security = False
                             # CPM, modify the Reference Time
                             cpm = CPM.decode("CollectivePerceptionMessage", facilities)
+                            StationID = cpm['header']['stationID']
                             old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
                             new_reference_time = get_timestamp_ms(purpose="CPM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -316,7 +316,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
                             
                             if security_enabled and should_update_security:
-                                StationID = cpm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
                                     LastAssigned += 1
@@ -327,6 +326,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             # CAM, modify the Generation Delta Time
                             mtype = 'CAM'
                             cam = CAM.decode("CAM", facilities)
+                            StationID = cam['header']['stationID']
                             old_reference_time = cam["cam"]["generationDeltaTime"]
                             new_reference_time = get_timestamp_ms(purpose="CAM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -357,7 +357,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                             mex_encoded = CAM.encode("CAM", cam)
                             if security_enabled and should_update_security:
-                                StationID = cam['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
                                     LastAssigned += 1
@@ -367,6 +366,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             should_update_security = False
                             # VAM, modify the Generation Delta Time
                             vam = VAM.decode("VAM", facilities)
+                            StationID = vam['header']['stationID']
                             old_reference_time = vam["vam"]["generationDeltaTime"]
                             new_reference_time = get_timestamp_ms(purpose="VAM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -389,6 +389,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         elif port == 2002:
                             mtype = 'DENM'
                             denm = DENM.decode("DENM", facilities)
+                            StationID = denm['header']['stationID']
                             old_reference_time = denm["denm"]["management"]["detectionTime"]
                             new_reference_time = get_timestamp_ms(purpose="DENM")
                             assert new_reference_time > 0, "Error in time calculation"
@@ -405,7 +406,6 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
                             
                             if security_enabled and should_update_security:
-                                StationID = denm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
                                     LastAssigned += 1
@@ -454,9 +454,9 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                 try:
                     sock.send(new_pkt)
                     if enable_amqp:
-                        # Send the packet to the AMQP broker
-                        properties = compute_properties()
-                        succ = amqp_sender.send_message(new_pkt, message_id=f"packet{i+1}", properties=properties)
+                        # Send the packet to the AMQP broker (excluding first 14 bytes of any Ethernet II "dummy" header)
+                        properties = compute_properties(security_enabled, port, StationID)
+                        succ = amqp_sender.send_message(new_pkt[ETHER_LENGTH:], message_id=f"packet{i+1}", properties=properties)
                         if not succ:
                             print("ERROR on message sending to the AMQP broker!")
                 except Exception as e:
