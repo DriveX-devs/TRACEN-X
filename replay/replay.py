@@ -99,7 +99,6 @@ def main():
     args.add_argument("--amqp-server-ip", type=str, help="The IP address of the AMQP server. Default is 127.0.0.1", default="127.0.0.1")
     args.add_argument("--amqp-server-port", type=int, help="The Port of the AMQP server. Default is 5867", default=5867)
     args.add_argument("--amqp-topic", type=str, help="The Topic of the AMQP server. Default is tracenx", default="tracenx")
-    args.add_argument("--max-certificates", type=int, help="The maximum number of certificates to manage. Default is 0, which means it will not limit the number of certificates.", default=0)
     args.add_argument("--update-security", action="store_true", help="If set, the script will check and update the security certificates. Default is False", default=False)
 
     args = args.parse_args()
@@ -146,8 +145,8 @@ def main():
     amqp_server_ip = args.amqp_server_ip
     amqp_server_port = args.amqp_server_port
     amqp_topic = args.amqp_topic
-    maxCertificates = args.max_certificates
     update_security = args.update_security
+    certificates = None
 
     assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
     CERT_PATH = Path(__file__).resolve().parents[1] / "PKIManager" / "certificates" / "certificates.json"
@@ -170,8 +169,12 @@ def main():
     if enable_pcap and update_datetime and update_security:
         certificates = countCertificates(pcap_filename, args.start_time, args.end_time)
         print(f"The pcap file contains {certificates} certificates")
-        active_certificates = count_active_certificates(CERT_PATH, maxCertificates=maxCertificates)
-        print(active_certificates)
+        credentials_path = CERT_PATH.parent / "credentials.json"
+        with open(credentials_path, "r", encoding="utf-8") as credentials_file:
+            credentials_data = json.load(credentials_file)
+        credential_count = len(credentials_data.get("vehicles", {}))
+        active_certificates = count_active_certificates(CERT_PATH, maxCertificates=credential_count)
+        print(f"The credentials file contains {credential_count} credentials")
         for key in active_certificates.keys():
             ECisValid, ATisValid = active_certificates[key]
             if not ECisValid:
@@ -213,7 +216,6 @@ def main():
                 atManager.createRequest(key)
                 atManager.sendPOST(key)
                 atResponse.getATResponse(key)
-
         if certificates > len(active_certificates):
             print(f"There are not enough active certificates. There are {len(active_certificates)} active certificates.")
             print("Please add new certificates before starting the pcap emulation.")
@@ -288,7 +290,6 @@ def main():
         csv_process.start()
 
     if enable_pcap:
-        
         assert os.path.exists(pcap_filename)
         pcap_process = Process(target=write_pcap, args=(stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
         pcap_process.start()

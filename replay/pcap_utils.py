@@ -242,7 +242,8 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         pack = raw(pkt)
                         EtherAndBasic = pack[:ETHER_LENGTH+BASICHEADER]
                         DecodedPacket = SECURITY.decode("Ieee1609Dot2Data", pack[18:])
-                        UnsecuredData = DecodedPacket['content'][1]['tbsData']['payload']['data']['content'][1]
+                        payload_data = DecodedPacket['content'][1]['tbsData']['payload']['data']
+                        payload_choice, UnsecuredData = payload_data['content']
                         Signer = DecodedPacket['content'][1]['signer'][0]  # header
                         if Signer == 'digest':
                             isCertificate = False
@@ -277,12 +278,17 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                         port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
                         facilities = payload[4:]
 
+                    should_update_security = update_security
+                    mtype = None
+                    StationID = None
+
                     if not new_geonet or not btp or not facilities or not port:
                         new_pkt = raw(pkt)
                     else:
                         mex_encoded = None
                         if port == 2009:
                             mtype = 'CPM'
+                            should_update_security = False
                             # CPM, modify the Reference Time
                             cpm = CPM.decode("CollectivePerceptionMessage", facilities)
                             old_reference_time = cpm["payload"]["managementContainer"]["referenceTime"]
@@ -309,7 +315,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
                             
-                            if security_enabled and update_security:
+                            if security_enabled and should_update_security:
                                 StationID = cpm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -350,7 +356,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         zone["expiryTime"] = new_reference_time + delta
 
                             mex_encoded = CAM.encode("CAM", cam)
-                            if security_enabled and update_security:
+                            if security_enabled and should_update_security:
                                 StationID = cam['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -358,6 +364,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
 
                         elif port == 2018:
                             mtype = 'VAM'
+                            should_update_security = False
                             # VAM, modify the Generation Delta Time
                             vam = VAM.decode("VAM", facilities)
                             old_reference_time = vam["vam"]["generationDeltaTime"]
@@ -397,7 +404,7 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                         delta = old_expiry_time - old_reference_time
                                         zone["expiryTime"] = new_reference_time + delta
                             
-                            if security_enabled and update_security:
+                            if security_enabled and should_update_security:
                                 StationID = denm['header']['stationID']
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
@@ -415,9 +422,12 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                             # rebuild the security layer
                             new_payload = btp + mex_encoded
                             UnsecuredDataUpdate[payload_offset:] = new_payload
-                            if update_security:
+                            
+                            if should_update_security:
                                 if not certificates:
                                     raise ValueError("Certificates are required to rebuild secured packets")
+                                if StationID is None:
+                                    raise ValueError("StationID is required to rebuild secured packets")
                                 vehicle_idx = VehicleDict[StationID] % len(certificates)
                                 vehicle_key = str(vehicle_idx)
                                 if vehicle_key not in certificates or 'AT' not in certificates[vehicle_key]:
@@ -425,8 +435,9 @@ def write_pcap(stop_event: Any, input_filename: str, interface: str, start_time:
                                 certificate = certificates[vehicle_key]['AT']
                                 SecuredPacket = security.createSecurePacket(bytes(UnsecuredDataUpdate), certificate, vehicle_idx, isCertificate, mtype)
                                 new_pkt = EtherAndBasic + SecuredPacket
-                            if not update_security:
-                                DecodedPacket['content'][1]['tbsData']['payload']['data']['content'][1] = bytes(UnsecuredDataUpdate)
+                            
+                            if not should_update_security:
+                                payload_data['content'] = (payload_choice, bytes(UnsecuredDataUpdate))
                                 new_pkt = EtherAndBasic + SECURITY.encode("Ieee1609Dot2Data", DecodedPacket)
 
                 except Exception as e:
