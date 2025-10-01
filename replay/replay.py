@@ -3,6 +3,7 @@ import os
 import signal
 import json
 import sys
+from tqdm import tqdm
 from pathlib import Path
 from multiprocessing import Process, Event
 
@@ -174,8 +175,8 @@ def main():
             credentials_data = json.load(credentials_file)
         credential_count = len(credentials_data.get("vehicles", {}))
         active_certificates = count_active_certificates(CERT_PATH, maxCertificates=credential_count)
-        print(f"The credentials file contains {credential_count} credentials")
-        for key in active_certificates.keys():
+        
+        for key in tqdm(active_certificates.keys(), desc="Processing certificates"):
             ECisValid, ATisValid = active_certificates[key]
             if not ECisValid:
                 # ask EC and AT certificates

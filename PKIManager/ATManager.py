@@ -8,8 +8,6 @@ import time
 import glob
 import hmac
 
-from dataclasses import dataclass, field
-from typing import List
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
@@ -28,80 +26,17 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from .INIReader import INIReader
 from .ECResponse import ECResponse
 from .CRReader import CRRReader
-from dataclasses import dataclass
+from .utils.exceptions import SecurityError, SecurityConfigurationError
+from .utils.security_models import (
+    GNpublicKey,
+    GNpsidSsp,
+    GNecdsaNistP256,
+    GNcertificateDC,
+    GNsignMaterial,
+    EncData,
+    IniAT,
+)
 
-@dataclass
-class GNpublicKey:
-    """
-    One-to-one replica of the C++ return object exposing
-    the compressed public key *without prefix* and the prefix type.
-    - x_only: 32-byte hexadecimal string of the X coordinate
-    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
-    """
-    pk: bytes = b""
-    prefix: str = ""  # 2 (even y) or 3 (odd y)
-
-@dataclass
-class GNpsidSsp:
-    psid: int = None
-    bitmapSsp: str = None
-
-@dataclass
-class GNecdsaNistP256:
-    p256_x_only: bytes = b""
-    p256_fill: bytes = b""
-    p256_compressed_y_0: bytes = b""
-    p256_compressed_y_1: bytes = b""
-    p256_uncompressed_x: bytes = b""
-    p256_uncompressed_y: bytes = b""
-
-@dataclass
-class GNtbsCertDC:
-    id: int = 0
-    name: str = ""
-    cracaId: str = ""
-    crlSeries: int = 0
-    validityPeriod_start: int = 0
-    validityPeriod_duration: int = 0
-    appPermissions: List[GNpsidSsp] = field(default_factory=list)
-    symAlgEnc: int = 0
-    encPublicKey: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    verifyKeyIndicator: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-
-@dataclass
-class GNcertificateDC:
-    version: int = 0
-    type: int = 0
-    issuer: str = ""
-    tbs: GNtbsCertDC = field(default_factory=GNtbsCertDC)
-    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    signature_sSig: str = ""
-
-@dataclass
-class GNsignMaterial:
-    r: bytes = b""
-    s: bytes = b""
-
-@dataclass
-class EncData:
-    ciphertextWithTag: bytes = b""
-    encryptedKey: bytes = b""
-    ephemeralPublicKey: bytes = b""
-    x_value: bytes = b""
-    y_value: bytes = b""
-    eciesTag: bytes = b""
-    nonce: bytes = b""
-
-@dataclass
-class IniAT:
-    recipientAA: str = ""
-    aaCert1: str = ""
-    aaCert2: str = ""
-    aaCert3: str = ""
-    aaCert4: str = ""
-    bitmapCAM: str = ""
-    bitmapDENM: str = ""
-    eaIDstring: str = ""
 
 class ATManager:
     def __init__(self, terminatorFlagPtr: bool = None):
@@ -144,26 +79,29 @@ class ATManager:
             with open(file_name, "rb") as file_in:
                 length_bytes = file_in.read(8)  # size_t is typically 8 bytes
                 if len(length_bytes) < 8:
-                    print("Error reading length from file.")
-                    return key
+                    raise SecurityError(f"Error reading length from '{file_name}'")
                 length = int.from_bytes(length_bytes, byteorder="little")
                 key_bytes = file_in.read(length)
                 key = key_bytes.decode("utf-8")
                 print(f"Pre Shared Key retrieved: {key}")
+        except FileNotFoundError as e:
+            raise SecurityError(f"Pre-shared key file '{file_name}' not found") from e
+        except OSError as e:
+            raise SecurityError(f"Error opening file '{file_name}' for reading") from e
         except Exception as e:
-            print(f"Error opening file for reading: {e}")
+            raise SecurityError(f"Failed to retrieve pre-shared key from '{file_name}'") from e
         return key
-    
+
     @staticmethod
     def saveStringToFile(key: str, file_name: str):
-            try:
-                with open(file_name, "wb") as file_out:
-                    length = len(key)
-                    file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
-                    file_out.write(key.encode("utf-8"))  # Write the string
-                    print("Pre Shared Key saved to binary file.")
-            except Exception as e:
-                print(f"Error opening file for writing: {e}")
+        try:
+            with open(file_name, "wb") as file_out:
+                length = len(key)
+                file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
+                file_out.write(key.encode("utf-8"))  # Write the string
+                print("Pre Shared Key saved to binary file.")
+        except OSError as e:
+            raise SecurityError(f"Failed to persist pre-shared key to '{file_name}'") from e
     
 
     def generateHMACKey(self):
@@ -179,29 +117,25 @@ class ATManager:
     def loadCompressedPublicKey(self, compressed_key: bytes, compression: int):
         
         if len(compressed_key) != 32:
-            print("Key must be 32 bytes long")
-            return None
+            raise SecurityError("Compressed public key must be 32 bytes long")
         # Prefix: 0x02 (even y) or 0x03 (odd y)
         if compression == 2:
             pk_data = b'\x02'
         elif compression == 3:
             pk_data = b'\x03'
         else:
-            print("Compression must be 2 or 3")
-            return None
+            raise SecurityError("Compression must be 2 or 3 for EC public keys")
 
         pk_data = pk_data + compressed_key
         if len(pk_data) != 33:
-            print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
-            return None
+            raise SecurityError("Compressed key with prefix must be exactly 33 bytes")
         # Load the ECC public key from compressed bytes
         try:
             evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(self.CURVE, pk_data)            
             return evp_pkey
         
         except Exception as e:
-            print(f"Errore nella conversione della chiave pubblica compressa: {e}")
-            return None
+            raise SecurityError("Failed to convert compressed public key") from e
         
     @staticmethod
     def computeSHA256(data: bytes) -> bytes:
@@ -229,7 +163,6 @@ class ATManager:
 
         # Print and save the AES key (matching C++ ATManager behavior)
         aes_key_hex = ''.join(f'{byte:02x}' for byte in aesKey)
-        print(f"[INFO] Shared key: {aes_key_hex}")
         self.saveStringToFile(aes_key_hex, filePath)
 
         # 2) Encrypt with AES-128-CCM (using aesKey and nonce)
@@ -240,7 +173,7 @@ class ATManager:
 
         # 3) Validate receiver's public key and generate ephemeral key for ECDH
         if not isinstance(receiverPublicKey, ec.EllipticCurvePublicKey):
-            raise InvalidKey("La chiave pubblica del destinatario non è EC o non è valida.")
+            raise InvalidKey("The recipient's public key is not an EC key or is invalid.")
         ephemeralKey = ec.generate_private_key(self.CURVE)
 
         sharedSecret = ephemeralKey.exchange(ec.ECDH(), receiverPublicKey)  # ECDH
@@ -285,10 +218,6 @@ class ATManager:
 
         receiver_pub_key = self.loadCompressedPublicKey(publicKeyEA, compression)
 
-        if receiver_pub_key is None:
-            print("Failed to load the public key!")
-            return None
-
         data = EncData()
         
         # FIX: Remove extra argument, pass only message, receiver_pub_key, p1, id
@@ -315,160 +244,119 @@ class ATManager:
         try:
             with open(private_key_file, 'rb') as f:
                 priv_file = f.read()
-        except Exception as e:
-            print("Error opening file to load private key", file=sys.stderr)
-            self.print_error(e)
-            return None
+        except OSError as e:
+            raise SecurityError(f"Unable to open private key file '{private_key_file}'") from e
         ec_key = None
         try:
             ec_key = load_pem_private_key(priv_file, password=password)
         except Exception as e:
-            print("Error reading private key from file", file=sys.stderr)
-            self.print_error(e)
-            return None
+            raise SecurityError(f"Unable to read private key from '{private_key_file}'") from e
         if not isinstance(ec_key, ec.EllipticCurvePrivateKey):
-            print("Loaded private key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded private key is not an EC key")
         try:
             with open(public_key_file, 'rb') as f:
                 pub_bytes = f.read()
-        except Exception as e:
-            print("Error opening file to load public key", file=sys.stderr)
-            self.print_error(e)
-            return None
+        except OSError as e:
+            raise SecurityError(f"Unable to open public key file '{public_key_file}'") from e
         try:
             pub_key = load_pem_public_key(pub_bytes)
         except Exception as e:
-            print("Error reading public key from file", file=sys.stderr)
-            self.print_error(e)
-            return None
+            raise SecurityError(f"Unable to read public key from '{public_key_file}'") from e
         if not isinstance(pub_key, ec.EllipticCurvePublicKey):
-            print("Loaded public key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded public key is not an EC key")
 
         if not isinstance(ec_key.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
-            print("EC curve mismatch or unsupported curve", file=sys.stderr)
-            return None
+            raise SecurityError("EC curve mismatch or unsupported curve")
         
         priv_pub_numbers = ec_key.public_key().public_numbers()
         loaded_pub_numbers = pub_key.public_numbers()
         if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
-            print("Public key does not match the private key", file=sys.stderr)
-            return None
+            raise SecurityError("Public key does not match the private key")
         return ec_key
     
     def recoverECKeyPair(self, ephemeral: bool, id: int) -> "GNpublicKey":
         public_key = GNpublicKey()
         keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{id}')
-        try:
-            if ephemeral:
-                private_key_file = os.path.join(keys_folder,"ephSKEY2.pem")
-                public_key_file = os.path.join(keys_folder,"ephPKEY2.pem")
-                ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
-                if ec_key is None:
-                    return public_key
-                # Store as the ephemeral key
-                self.m_EPHecKey = ec_key
-            else:
 
-                private_key_file = os.path.join(keys_folder,"ephSKEY.pem")
-                public_key_file = os.path.join(keys_folder,"ephPKEY.pem")
-                ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
-                if ec_key is None:
-                    return public_key
-                # Store as the primary key
-                self.m_ecKey = ec_key
+        if ephemeral:
+            private_key_file = os.path.join(keys_folder, "ephSKEY2.pem")
+            public_key_file = os.path.join(keys_folder, "ephPKEY2.pem")
+            ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
+            self.m_EPHecKey = ec_key
+        else:
+            private_key_file = os.path.join(keys_folder, "ephSKEY.pem")
+            public_key_file = os.path.join(keys_folder, "ephPKEY.pem")
+            ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
+            self.m_ecKey = ec_key
 
-            # Extract the public component and determine the prefix (y parity)
-            pub_numbers = ec_key.public_key().public_numbers()
-            
-            x_bytes = pub_numbers.x.to_bytes(32, "big")
-            y_is_even = (pub_numbers.y % 2) == 0
-            prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'
+        pub_numbers = ec_key.public_key().public_numbers()
 
-            # Extract the public component in compressed format
-            pub_key = ec_key.public_key()
-            
-            # Obtain the compressed key using cryptography
-            compressed_point = pub_key.public_bytes(
-                Encoding.X962, 
-                PublicFormat.CompressedPoint
-            )
-            
-            # The first byte is the prefix (0x02 or 0x03), the next 32 bytes are the x coordinate
-            prefix_byte = compressed_point[0]
-            x_bytes = compressed_point[1:33]
-            
-            prefix_type = 'compressed_y_0' if prefix_byte == 0x02 else 'compressed_y_1'
+        x_bytes = pub_numbers.x.to_bytes(32, "big")
+        y_is_even = (pub_numbers.y % 2) == 0
+        prefix_type = 'compressed_y_0' if y_is_even else 'compressed_y_1'
 
-            public_key.pk = x_bytes
-            public_key.prefix = prefix_type
-            return public_key
-        except Exception as e:
-            print("Error recovering EC key pair", file=sys.stderr)
-            return public_key
+        compressed_point = ec_key.public_key().public_bytes(
+            Encoding.X962,
+            PublicFormat.CompressedPoint
+        )
 
-    def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> dict | None:
+        prefix_byte = compressed_point[0]
+        x_bytes = compressed_point[1:33]
+
+        prefix_type = 'compressed_y_0' if prefix_byte == 0x02 else 'compressed_y_1'
+
+        public_key.pk = x_bytes
+        public_key.prefix = prefix_type
+        return public_key
+
+    def signHash(self, hash: bytes, ec_private_key: ec.EllipticCurvePrivateKey) -> bytes:
 
         try:
-            # Input validation
             if not isinstance(hash, (bytes, bytearray)):
-                raise TypeError("hash_bytes deve essere bytes")
+                raise SecurityError("Hash value must be bytes")
             if len(hash) != 32:
-                raise ValueError("SHA-256 digest atteso: 32 byte")
-            
-            signature = ec_private_key.sign(hash,ec.ECDSA(Prehashed(hashes.SHA256())))
-            return signature
+                raise SecurityError("Expected a 32-byte SHA-256 digest")
+
+            return ec_private_key.sign(hash, ec.ECDSA(Prehashed(hashes.SHA256())))
+        except SecurityError:
+            raise
         except Exception as e:
-            print("Error signing hash", file=sys.stderr)
+            raise SecurityError("Error signing hash") from e
     
-    def signatureCreation(self, tbsData: bytes, ephemeral: bool, signer_hex: str | None = None) -> GNsignMaterial | None:
+    def signatureCreation(self, tbsData: bytes, ephemeral: bool, signer_hex: bytes | None = None) -> GNsignMaterial:
 
         try:
             signMaterial = GNsignMaterial()
 
-            # If signer_hex is not provided, use an empty byte array ("self" behavior)
-            if signer_hex:
-                signer_bytes =signer_hex
-            else:
-                signer_bytes = b''
+            signer_bytes = signer_hex if signer_hex else b''
 
-            # Compute the individual hashes
             tbsData_hash = self.computeSHA256(tbsData)
             signer_hash = self.computeSHA256(signer_bytes)
 
-            # Concatenate the hashes and compute the final hash
             concatenatedHashes = tbsData_hash + signer_hash
             final_hash = self.computeSHA256(concatenatedHashes)
 
-            # Select the appropriate key
             if ephemeral:
                 if self.m_EPHecKey is None:
-                    print("Ephemeral EC key not loaded", file=sys.stderr)
-                    return None
+                    raise SecurityError("Ephemeral EC key not loaded")
                 ec_key = self.m_EPHecKey
             else:
                 if self.m_ecKey is None:
-                    print("Main EC key not loaded", file=sys.stderr)
-                    return None
+                    raise SecurityError("Main EC key not loaded")
                 ec_key = self.m_ecKey
 
-            # Sign the final hash
             signature = self.signHash(final_hash, ec_key)
-            if signature is None:
-                return None # Error already printed by signHash
 
-            # Extract r and s and normalize them to 32 bytes
             r_int, s_int = decode_dss_signature(signature)
-            
+
             signMaterial.r = r_int.to_bytes(32, byteorder='big')
             signMaterial.s = s_int.to_bytes(32, byteorder='big')
 
             return signMaterial
+        except SecurityError:
+            raise
         except Exception as e:
-            print(f"Error during signature creation: {e}", file=sys.stderr)
-            traceback.print_exc()
-            return None
+            raise SecurityError("Error during signature creation") from e
     
     @staticmethod
     def getCurrentTimestamp() -> int:
@@ -503,16 +391,17 @@ class ATManager:
         Prints an error if the file can't be loaded (ParseError() < 0).
         """
         ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
-        credentials = os.path.join(self.path, 'certificates', 'credentials.json')
-        
+        credentials_path = os.path.join(self.path, 'certificates', 'credentials.json')
+
         reader = INIReader(ini_path)
         if reader.ParseError() < 0:
-            print(f"[ERR] Can't load '{ini_path}'")
-        
-        credentials = CRRReader(credentials, id)
+            raise SecurityConfigurationError(f"Can't load '{ini_path}'")
+
+        credentials = CRRReader(credentials_path, id)
         if credentials is None:
-            print(f"[ERR] Can't load credentials from '{credentials}'", file=sys.stderr)
-            return None
+            raise SecurityConfigurationError(
+                f"Can't load credentials from '{credentials_path}' for vehicle '{id}'"
+            )
         
         ini = IniAT(
             aaCert1=reader.Get("ATinfo", "AAcert1", "UNKNOWN"),
@@ -533,77 +422,59 @@ class ATManager:
 
         priv_path = os.path.join(keys_folder,'ephSKEY2.pem')
         pub_path = os.path.join(keys_folder,'ephPKEY2.pem')
-        
         try:
-            # Create output directory if missing
             priv_dir = os.path.dirname(priv_path) or "."
             os.makedirs(priv_dir, exist_ok=True)
-            
-            # Generate key pair on NID_X9_62_prime256v1 (aka SECP256R1)
-            try:
-                ec_key = ec.generate_private_key(ec.SECP256R1())
-            except Exception as e:
-                print("Error creating EC_KEY object", file=sys.stderr)
-                self.print_openssl_error()
-                return
+        except OSError as e:
+            raise SecurityError(f"Unable to create directory '{priv_dir}' for key generation") from e
 
-            try:
-                priv_pem = ec_key.private_bytes(
-                    Encoding.PEM,
-                    PrivateFormat.TraditionalOpenSSL,
-                    NoEncryption(),
-                )
-            except Exception as e:
-                print("Error generating EC key pair", file=sys.stderr)
-                self.print_openssl_error()
-                return
-                
-            # Write private key
-            try:
-                with open(priv_path, "wb") as f:
-                    f.write(priv_pem)
-            except Exception as e:
-                print("Error opening file for writing private key", file=sys.stderr)
-                return
-                
-            # Serialize public key in SubjectPublicKeyInfo PEM (matches PEM_write_EC_PUBKEY)
-            try:
-                pub_pem = ec_key.public_key().public_bytes(
-                    Encoding.PEM,
-                    PublicFormat.SubjectPublicKeyInfo,
-                )
-            except Exception as e:
-                print("Error writing public key to PEM file", file=sys.stderr)
-                self.print_openssl_error()
-                return
-                
-            # Write public key
-            try:
-                with open(pub_path, "wb") as f:
-                    f.write(pub_pem)
-            except Exception as e:
-                print("Error opening file for writing public key", file=sys.stderr)
-                return
-                
-            print("Key pair generated and saved to ephSKEY2.pem and ephPKEY2.pem")
-            
+        try:
+            ec_key = ec.generate_private_key(self.CURVE)
         except Exception as e:
-            print("Error generating EC key pair", file=sys.stderr)
-            return
+            raise SecurityError("Error creating EC key pair") from e
+
+        try:
+            priv_pem = ec_key.private_bytes(
+                Encoding.PEM,
+                PrivateFormat.TraditionalOpenSSL,
+                NoEncryption(),
+            )
+        except Exception as e:
+            raise SecurityError("Error serializing private EC key") from e
+
+        try:
+            with open(priv_path, "wb") as f:
+                f.write(priv_pem)
+        except OSError as e:
+            raise SecurityError(f"Error writing private key to '{priv_path}'") from e
+
+        try:
+            pub_pem = ec_key.public_key().public_bytes(
+                Encoding.PEM,
+                PublicFormat.SubjectPublicKeyInfo,
+            )
+        except Exception as e:
+            raise SecurityError("Error serializing public EC key") from e
+
+        try:
+            with open(pub_path, "wb") as f:
+                f.write(pub_pem)
+        except OSError as e:
+            raise SecurityError(f"Error writing public key to '{pub_path}'") from e
+
+        print("Key pair generated and saved to ephSKEY2.pem and ephPKEY2.pem")
     
     def createRequest(self,id):
 
         if self.m_ECHex is None:
-            print("[ERROR] Critical error: m_ECHex is None. Cannot create any request.", file=sys.stderr)
             self.m_terminatorFlagPtr = True
-            return None
+            raise SecurityError("Critical error: m_ECHex is None. Cannot create request.")
         
         iniData = self.readIniFile(id)
         asn_folder = os.path.join("data", "asn", "security")
         asn_files = glob.glob(os.path.join(asn_folder, "*.asn"))
         if not asn_files:
-            print(f"[ERR] No ASN.1 file found in {asn_folder}")
-            return None
+            raise SecurityConfigurationError(f"No ASN.1 file found in '{asn_folder}'")
         
         asn1_modules = asn1tools.compile_files(asn_files, 'oer')
         AAcertificate = self.AACertificate
@@ -858,15 +729,14 @@ class ATManager:
         encode_result = asn1_modules.encode('Ieee1609Dot2Data', ieeeData2)
 
         # Saving the binary file for the request
+        request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+        request_path = os.path.join(request_dir, 'requestAT.bin')
         try:
-            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
-            request_path = os.path.join(request_dir, 'requestAT.bin')
+            os.makedirs(request_dir, exist_ok=True)
             with open(request_path, "wb") as f:
                 f.write(encode_result)
-        except Exception as e:
-            print("Error opening file for writing the request", file=sys.stderr)
-            self.print_error(e)
-            return None
+        except OSError as e:
+            raise SecurityError(f"Error writing AT request to '{request_path}'") from e
         
         # Calculating request ID (16-byte SHA256 hash of the payload)
         request_id_full = self.computeSHA256(encode_result)
@@ -876,55 +746,43 @@ class ATManager:
         print(f"[INFO] Request ID: {request_id_hex}")
     
     def sendPOST(self,id):
+        request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
+        response_dir = os.path.join(self.path, 'certificates','responses', f'ITS_{id}')
+        request_path = os.path.join(request_dir, 'requestAT.bin')
+        response_path = os.path.join(response_dir, 'responseAT.bin')
+
         try:
-            request_dir = os.path.join(self.path, 'certificates', 'requests', f'ITS_{id}')
-            response_dir = os.path.join(self.path, 'certificates','responses', f'ITS_{id}')
-            request_path = os.path.join(request_dir, 'requestAT.bin')
-            response_path = os.path.join(response_dir, 'responseAT.bin')
+            os.makedirs(response_dir, exist_ok=True)
+        except OSError as e:
+            raise SecurityError("Unable to prepare directory for AT response") from e
 
-            # Ensure output directory exists
-            response_dir = os.path.dirname(response_path)
-            if response_dir:
-                os.makedirs(response_dir, exist_ok=True)
-
-            # FIX: Check if request_path exists, not response_path
-            if not os.path.exists(request_path):
-                print(f"[ERR] File '{request_path}' does not exist.")
-                return
-
-            # Read the binary request file
+        try:
             with open(request_path, 'rb') as f:
                 file_data = f.read()
+        except FileNotFoundError as e:
+            raise SecurityError(f"AT request payload '{request_path}' not found") from e
+        except OSError as e:
+            raise SecurityError(f"Unable to read AT request from '{request_path}'") from e
 
-            # URL and headers matching C++ implementation
-            url = "http://0.atos-aa.l0.c-its-pki.eu/"
-            headers = {
-                "Content-Type": "application/x-its-request"
-            }
+        url = "http://0.atos-aa.l0.c-its-pki.eu/"
+        headers = {
+            "Content-Type": "application/x-its-request"
+        }
 
-            # Send POST request
+        try:
             response = requests.post(url, data=file_data, headers=headers, timeout=30)
             response.raise_for_status()
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            body_text = e.response.text if e.response is not None else str(e)
+            raise SecurityError(f"AA POST failed with status {status}: {body_text}") from e
+        except requests.RequestException as e:
+            raise SecurityError("Error during POST request to AA") from e
 
-            # Save response to binary file
+        try:
             with open(response_path, 'wb') as f:
                 f.write(response.content)
+        except OSError as e:
+            raise SecurityError(f"Unable to write AT response to '{response_path}'") from e
 
-            print(f"[INFO] Response saved to {response_path}")
-
-        except requests.exceptions.RequestException as e:
-            print(f"[ERR] Request failed, error: {e}")
-        except Exception as e:
-            print(f"[ERR] Error during POST request: {e}")
-
-# example usage:
-if __name__ == "__main__":
-    manager = ATManager()
-    ec_response = ECResponse()
-    ec_response.ephemeral = False
-    certificate = ec_response.getECResponse()
-    print(ec_response.m_ecBytesStr.hex())
-    manager.m_ECHex = ec_response.m_ecBytesStr
-    manager.regeneratePEM()  # Generate new ephemeral key pair
-    manager.createRequest()   # Create and save the AT request
-    manager.sendPOST()      # Send the request via HTTP POST
+        return response_path

@@ -5,8 +5,7 @@ import sys
 import glob
 import json
 
-from dataclasses import dataclass, field, asdict, is_dataclass
-from typing import List
+from dataclasses import asdict, is_dataclass
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
@@ -24,123 +23,16 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from .INIReader import INIReader
 from .CRReader import CRRReader
-
-
-
-@dataclass
-class GNpublicKey:
-    """
-    One-to-one replica of the C++ return object exposing
-    the compressed public key *without prefix* and the prefix type.
-    - x_only: 32-byte hexadecimal string of the X coordinate
-    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
-    """
-    pk: bytes = b""
-    prefix: str = ""  # 2 (even y) or 3 (odd y)
-
-@dataclass
-class GNpsidSsp:
-    psid: int = None
-    bitmapSsp: str = None
-
-@dataclass
-class GNecdsaNistP256:
-    p256_x_only: bytes = b""
-    p256_fill: bytes = b""
-    p256_compressed_y_0: bytes = b""
-    p256_compressed_y_1: bytes = b""
-    p256_uncompressed_x: bytes = b""
-    p256_uncompressed_y: bytes = b""
-
-@dataclass
-class GNtbsCertDC:
-    id: int = 0
-    name: str = ""
-    cracaId: str = ""
-    crlSeries: int = 0
-    validityPeriod_start: int = 0
-    validityPeriod_duration: int = 0
-    appPermissions: List[GNpsidSsp] = field(default_factory=list)
-    symAlgEnc: int = 0
-    encPublicKey: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    verifyKeyIndicator: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-
-@dataclass
-class GNcertificateDC:
-    version: int = 0
-    type: int = 0
-    issuer: str = ""
-    tbs: GNtbsCertDC = field(default_factory=GNtbsCertDC)
-    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    signature_sSig: str = ""
-
-@dataclass
-class GNsignMaterial:
-    r: bytes = b""
-    s: bytes = b""
-
-@dataclass
-class EncData:
-    ciphertextWithTag: bytes = b""
-    encryptedKey: bytes = b""
-    ephemeralPublicKey: bytes = b""
-    x_value: bytes = b""
-    y_value: bytes = b""
-    eciesTag: bytes = b""
-    nonce: bytes = b""
-
-@dataclass
-class IniAT:
-    recipientAA: str = ""
-    aaCert1: str = ""
-    aaCert2: str = ""
-    aaCert3: str = ""
-    aaCert4: str = ""
-    bitmapCAM: str = ""
-    bitmapDENM: str = ""
-    eaIDstring: str = ""
-    itsID: str = ""
-    public_key_rfc: str = ""
-    private_key_rfc1: str = ""
-    private_key_rfc2: str = ""
-
-@dataclass 
-class tbsDataSigned:
-    protocolversion: int = 0
-    unsecuredData: str = ""
-    header_psid: int = 0
-    header_generationTime: int = 0
-
-@dataclass
-class eData:
-    recipient: str = ""
-    nonce: str = ""
-    ciphertext: str = ""
-
-@dataclass
-class sData:
-    hashID: int = 0
-    tbsdata: "tbsDataSigned" = field(default_factory=lambda: tbsDataSigned())
-    signer_digest: str = ""
-    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    signature_sSig: str = ""
-
-@dataclass
-class contData:
-    signData: "sData" = field(default_factory=lambda: sData())
-    encrData: "eData" = field(default_factory=lambda: eData())
-    unsecuredData: str = ""
-
-@dataclass
-class cPacket:
-    m_protocolversion: int = 0
-    content: "contData" = field(default_factory=lambda: contData())
-
-@dataclass
-class response:
-    requestHash: str = ""
-    response_code: int = 0
-    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: was GNecdsaNistP256
+from .utils.exceptions import SecurityError, SecurityConfigurationError
+from .utils.security_models import (
+    GNcertificateDC,
+    GNecdsaNistP256,
+    GNpsidSsp,
+    GNpublicKey,
+    IniAT,
+    cPacket,
+    response,
+)
 
 
 class ATResponse:
@@ -180,14 +72,17 @@ class ATResponse:
             with open(file_name, "rb") as file_in:
                 length_bytes = file_in.read(8)  # size_t is typically 8 bytes
                 if len(length_bytes) < 8:
-                    print("Error reading length from file.")
-                    return key
+                    raise SecurityError(f"Error reading length from '{file_name}'")
                 length = int.from_bytes(length_bytes, byteorder="little")
                 key_bytes = file_in.read(length)
                 key = key_bytes.decode("utf-8")
                 print(f"Pre Shared Key retrieved: {key}")
+        except FileNotFoundError as e:
+            raise SecurityError(f"Pre-shared key file '{file_name}' not found") from e
+        except OSError as e:
+            raise SecurityError(f"Error opening file '{file_name}' for reading") from e
         except Exception as e:
-            print(f"Error opening file for reading: {e}")
+            raise SecurityError(f"Failed to retrieve pre-shared key from '{file_name}'") from e
         return key
     
     @staticmethod
@@ -201,44 +96,41 @@ class ATResponse:
                 file_out.write(length.to_bytes(8, byteorder="little"))  # Write the length (size_t, 8 bytes)
                 file_out.write(key.encode("utf-8"))  # Write the string
                 print("Pre Shared Key saved to binary file.")
-        except Exception as e:
-            print(f"Error opening file for writing: {e}")
+        except OSError as e:
+            raise SecurityError(f"Error opening file '{file_name}' for writing") from e
 
     def readFileContent(self, filename):
         try:
             with open(filename, 'rb') as file:
                 self.dataResponse = file.read()
                 self.length = len(self.dataResponse)
-        except Exception as e:
-            print(f"Error reading file content: {e}")
-            return None, 0
-    
+        except FileNotFoundError as e:
+            raise SecurityError(f"Response file '{filename}' not found") from e
+        except OSError as e:
+            raise SecurityError(f"Error reading file content from '{filename}'") from e
+
     def loadCompressedPublicKey(self, compressed_key: bytes, compression: int):
         
         if len(compressed_key) != 32:
-            print("Key must be 32 bytes long")
-            return None
+            raise SecurityError("Compressed public key must be 32 bytes long")
         # Prefix: 0x02 (even y) or 0x03 (odd y)
         if compression == 2:
             pk_data = b'\x02'
         elif compression == 3:
             pk_data = b'\x03'
         else:
-            print("Compression must be 2 or 3")
-            return None
+            raise SecurityError("Compression must be 2 or 3 for EC public keys")
 
         pk_data = pk_data + compressed_key
         if len(pk_data) != 33:
-            print("La chiave compressa con prefisso non ha la lunghezza corretta (33 byte).")
-            return None
+            raise SecurityError("Compressed key with prefix must be exactly 33 bytes")
         # Load the ECC public key from compressed bytes
         try:
             evp_pkey = ec.EllipticCurvePublicKey.from_encoded_point(self.CURVE, pk_data)            
             return evp_pkey
         
         except Exception as e:
-            print(f"Errore nella conversione della chiave pubblica compressa: {e}")
-            return None
+            raise SecurityError("Failed to convert compressed public key") from e
     
     @staticmethod
     def computeSHA256(data: bytes) -> bytes:
@@ -273,7 +165,7 @@ class ATResponse:
             )
             cached_key = self.retrieveStringFromFile(key_path)
             if not cached_key:
-                raise ValueError("Failed to retrieve pre-shared key from file")
+                raise SecurityError("Failed to retrieve pre-shared key for AT response")
             self.m_aesKeys[vehicle_id] = cached_key
 
         psk = bytes.fromhex(cached_key)
@@ -287,46 +179,38 @@ class ATResponse:
         try:
             with open(private_key_file, 'rb') as f:
                 priv_file = f.read()
-        except Exception as e:
-            print("Error opening file to load private key", file=sys.stderr)
-            self.print_error(e)
-            return None
-        ec_key = None
+        except OSError as e:
+            raise SecurityError(f"Unable to open private key file '{private_key_file}'") from e
+
         try:
             ec_key = load_pem_private_key(priv_file, password=password)
         except Exception as e:
-            print("Error reading private key from file", file=sys.stderr)
-            self.print_error(e)
-            return None
+            raise SecurityError(f"Unable to read private key from '{private_key_file}'") from e
+
         if not isinstance(ec_key, ec.EllipticCurvePrivateKey):
-            print("Loaded private key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded private key is not an EC key")
+
         try:
             with open(public_key_file, 'rb') as f:
                 pub_bytes = f.read()
-        except Exception as e:
-            print("Error opening file to load public key", file=sys.stderr)
-            self.print_error(e)
-            return None
+        except OSError as e:
+            raise SecurityError(f"Unable to open public key file '{public_key_file}'") from e
+
         try:
             pub_key = load_pem_public_key(pub_bytes)
         except Exception as e:
-            print("Error reading public key from file", file=sys.stderr)
-            self.print_error(e)
-            return None
+            raise SecurityError(f"Unable to read public key from '{public_key_file}'") from e
+
         if not isinstance(pub_key, ec.EllipticCurvePublicKey):
-            print("Loaded public key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded public key is not an EC key")
 
         if not isinstance(ec_key.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
-            print("EC curve mismatch or unsupported curve", file=sys.stderr)
-            return None
+            raise SecurityError("EC curve mismatch or unsupported curve")
         
         priv_pub_numbers = ec_key.public_key().public_numbers()
         loaded_pub_numbers = pub_key.public_numbers()
         if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
-            print("Public key does not match the private key", file=sys.stderr)
-            return None
+            raise SecurityError("Public key does not match the private key")
         return ec_key
     
     def readIniFile(self, vehicle_id: int) -> "IniAT":
@@ -334,7 +218,7 @@ class ATResponse:
         ini_path = os.path.join(self.path, 'certificates', 'PKI_info.ini')
         reader = INIReader(ini_path)
         if reader.ParseError() < 0:
-            print(f"[ERR] Can't load '{ini_path}'")
+            raise SecurityConfigurationError(f"Can't load '{ini_path}'")
 
         ini = IniAT(
             aaCert1=reader.Get("ATinfo", "AAcert1", "UNKNOWN"),
@@ -353,7 +237,9 @@ class ATResponse:
         credentials_path = os.path.join(self.path, 'certificates', 'credentials.json')
         credentials = CRRReader(credentials_path, vehicle_id)
         if credentials is None:
-            print(f"[ERR] Can't load credentials for vehicle '{vehicle_id}'")
+            raise SecurityConfigurationError(
+                f"Can't load credentials for vehicle '{vehicle_id}' from '{credentials_path}'"
+            )
         else:
             ini.itsID = credentials.get('itsID', "UNKNOWN")
             ini.public_key_rfc = credentials.get('public_key_rfc', ini.public_key_rfc)
@@ -369,69 +255,54 @@ class ATResponse:
         try:
             priv_der = bytes.fromhex(private_key_rfc)
         except Exception as e:
-            print("Error parsing private key hex string to DER", file=sys.stderr)
-            return None
+            raise SecurityError("Error parsing private key hex string to DER") from e
         try:
             pub_der = bytes.fromhex(public_key_rfc)
         except Exception as e:
-            print("Error parsing public key hex string to DER", file=sys.stderr)
-            return None
+            raise SecurityError("Error parsing public key hex string to DER") from e
         try:
             priv_key = load_der_private_key(priv_der, password=password)
         except Exception as e:
-            print("Error loading private key from PKCS#8 DER", file=sys.stderr)
-            return None
+            raise SecurityError("Error loading private key from PKCS#8 DER") from e
         if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
-            print("Loaded private key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded private key is not an EC key")
         try:
             pub_key = load_der_public_key(pub_der)
         except Exception as e:
-            print("Error loading public key from RFC 5480 DER", file=sys.stderr)
-            return None
+            raise SecurityError("Error loading public key from RFC 5480 DER") from e
         if not isinstance(pub_key, ec.EllipticCurvePublicKey):
-            print("Loaded public key is not an EC key", file=sys.stderr)
-            return None
+            raise SecurityError("Loaded public key is not an EC key")
 
         if not isinstance(priv_key.curve, type(self.CURVE)) or not isinstance(pub_key.curve, type(self.CURVE)):
-            print("EC curve mismatch or unsupported curve", file=sys.stderr)
-            return None
+            raise SecurityError("EC curve mismatch or unsupported curve")
 
         priv_pub_numbers = priv_key.public_key().public_numbers()
         loaded_pub_numbers = pub_key.public_numbers()
         if (priv_pub_numbers.x != loaded_pub_numbers.x) or (priv_pub_numbers.y != loaded_pub_numbers.y):
-            print("Public key does not match the private key", file=sys.stderr)
-            return None
+            raise SecurityError("Public key does not match the private key")
 
         return priv_key
     
     def reconverECKeyPair(self, ephemeral: bool, vehicle_id: int, ini_data: IniAT | None = None) -> GNpublicKey:
-        ec_key = None
         try:
             if ephemeral:
                 keys_folder = os.path.join(self.path, 'certificates', 'keys', f'ITS_{vehicle_id}')
                 private_key_file = os.path.join(keys_folder, 'ephSKEY.pem')
                 public_key_file = os.path.join(keys_folder, 'ephPKEY.pem')
                 ec_key = self.loadECKeyFromFile(private_key_file, public_key_file)
-                if ec_key is None:
-                    return GNpublicKey()  # Empty instance
-                self.m_EPHecKey = ec_key
-
+                self.m_EPHKey = ec_key
             else:
                 if ini_data is None:
                     ini_data = self.readIniFile(vehicle_id)
 
                 public_key_rfc = ini_data.public_key_rfc or ""
                 private_key_rfc = (ini_data.private_key_rfc1 or "") + (ini_data.private_key_rfc2 or "")
+                if not public_key_rfc or not private_key_rfc:
+                    raise SecurityConfigurationError("Missing RFC5480 key material for AT response")
                 ec_key = self.loadECKeyFromRFC5480(private_key_rfc, public_key_rfc)
-                
-                if ec_key is None:
-                    return GNpublicKey()  # Empty instance
                 self.m_ecKey = ec_key
-            
-            pub_key = ec_key.public_key()
 
-            compressed_bytes = pub_key.public_bytes(
+            compressed_bytes = ec_key.public_key().public_bytes(
                 encoding=Encoding.X962,
                 format=PublicFormat.CompressedPoint
             )
@@ -440,15 +311,14 @@ class ATResponse:
                 prefix_type = "compressed_y_0"
             elif prefix_byte == 0x03:
                 prefix_type = "compressed_y_1"
-            
-            result_key = GNpublicKey(
-                pk = compressed_bytes[1:],
-                prefix = prefix_type
-            )
-            return result_key
+            else:
+                raise SecurityError("Unexpected prefix while encoding EC public key")
+
+            return GNpublicKey(pk=compressed_bytes[1:], prefix=prefix_type)
+        except SecurityError:
+            raise
         except Exception as e:
-            print(f"Error in reconverECKeyPair: {e}")
-            return GNpublicKey()  # Empty instance
+            raise SecurityError("Error recovering EC key pair for AT response") from e
 
     def signatureVerification(self, tbsData: bytes, rValue: GNecdsaNistP256, sValue: str, verifyKeyIndicator: GNecdsaNistP256, ini: IniAT) -> bool:
 
@@ -458,18 +328,15 @@ class ATResponse:
             EAPublicKey = self.loadCompressedPublicKey(verifyKeyIndicator.p256_compressed_y_0, 2)
         elif verifyKeyIndicator.p256_compressed_y_1:
             EAPublicKey = self.loadCompressedPublicKey(verifyKeyIndicator.p256_compressed_y_1, 3)
-
         elif verifyKeyIndicator.p256_x_only:
-            # x-only is insufficient to reconstruct the public key (y parity is missing)
-            print("verifyKeyIndicator contiene solo x-only: impossibile ricostruire la chiave pubblica per la verifica.")
-            return False
+            raise SecurityError(
+                "verifyKeyIndicator contains only x-only data; cannot reconstruct public key"
+            )
         else:
-            print("verifyKeyIndicator non contiene una chiave pubblica utilizzabile.")
-            return False
+            raise SecurityError("verifyKeyIndicator does not contain a usable public key")
 
         if EAPublicKey is None:
-            print("Failed to load the public key!")
-            return False        
+            raise SecurityError("Failed to load EA public key for signature verification")
 
         signID = bytes.fromhex(ini.aaCert1 + ini.aaCert2 + ini.aaCert3 + ini.aaCert4)
         # Compute SHA-256 hashes
@@ -507,8 +374,7 @@ class ATResponse:
             )
             return True
         except Exception as e:
-            print("AT Signature is invalid")
-            return False
+            raise SecurityError("AT signature verification failed") from e
     
     def getATResponse(self, vehicle_id: int):
 
@@ -606,9 +472,8 @@ class ATResponse:
             'responseAT.bin'
         )
         self.readFileContent(response_path)
-        if self.dataResponse is None or self.length == 0:
-            print("Error reading ATResponse.bin file")
-            return None
+        if self.length == 0:
+            raise SecurityError(f"AT response file '{response_path}' is empty")
         
         self.ephemeral = False
         self.reconverECKeyPair(self.ephemeral, vehicle_id, ini)
@@ -643,8 +508,7 @@ class ATResponse:
             vehicle_id
         )
         if not encPacket.content.unsecuredData:
-            print("[ERR] Error decrypting the message")
-            return None  
+            raise SecurityError("Decrypted AT payload is empty")
         
         signedDataDecoded = asn1_modules.decode('Ieee1609Dot2Data', encPacket.content.unsecuredData)
         sPack = cPacket()
@@ -707,8 +571,7 @@ class ATResponse:
                 ATres.response_code = res['responseCode']
                 is_ok = (ATres.response_code == 'ok') or (ATres.response_code == 0)
                 if not is_ok:
-                    print(f"[ERR] Response code: {ATres.response_code}")
-                    return None
+                    raise SecurityError(f"AT response returned error code: {ATres.response_code}")
                 certDecoded = res['certificate']
                 ATres.certificate.version = certDecoded['version']
                 ATres.certificate.type = certDecoded['type']
@@ -764,8 +627,6 @@ class ATResponse:
                         ATres.certificate.rSig.p256_uncompressed_y = signCertDecoded[1]['rSig'][2]
                     ATres.certificate.signature_sSig = signCertDecoded[1]['sSig']
                 at = asn1_modules.encode('CertificateBase', certDecoded)
-                print("ATResponse successfully parsed")
-                print('AT Bytes:', at)
 
                 # inserting the certificate in the database
                 CPath = os.path.join(self.path, 'certificates', 'certificates.json')
@@ -789,21 +650,11 @@ class ATResponse:
                     existing_data[vehicle_key] = vehicle_entry
                     with open(CPath, 'w') as f:
                         json.dump(existing_data, f, indent=4)
-                    print(f"AT certificate data saved to {CPath}")
-                except Exception as e:
-                    print(f"Error saving AT certificate data to {CPath}: {e}")
+                except OSError as e:
+                    raise SecurityError(f"Error saving AT certificate data to {CPath}") from e
+                except json.JSONDecodeError as e:
+                    raise SecurityError(f"Invalid JSON in certificate store '{CPath}'") from e
 
                 return ATres.certificate
         else:
-            print("Signature verification failed")
-            return None
-
-# example of usage
-if __name__ == "__main__":
-    at_response = ATResponse()
-    certificate = at_response.getATResponse(0)
-    if certificate:
-        print("Extracted Certificate:")
-        print(certificate)
-    else:
-        print("Failed to extract certificate from AT Response.")
+            raise SecurityError("AT response signature verification failed")

@@ -6,8 +6,6 @@ import glob
 import json
 import time
 
-from dataclasses import dataclass, field
-from typing import List
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
@@ -21,122 +19,22 @@ from cryptography.hazmat.primitives.serialization import (
 
 from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature, Prehashed
-
-@dataclass
-class GNpublicKey:
-    """
-    One-to-one replica of the C++ return object exposing
-    the compressed public key *without prefix* and the prefix type.
-    - x_only: 32-byte hexadecimal string of the X coordinate
-    - prefix_type: 2 if y is even (0x02), 3 if y is odd (0x03)
-    """
-    pk: bytes = b""
-    prefix: str = ""  # 2 (even y) or 3 (odd y)
-
-@dataclass
-class GNpsidSsp:
-    psid: int = None
-    bitmapSsp: str = None
-
-@dataclass
-class GNecdsaNistP256:
-    p256_x_only: bytes = b""
-    p256_fill: bytes = b""
-    p256_compressed_y_0: bytes = b""
-    p256_compressed_y_1: bytes = b""
-    p256_uncompressed_x: bytes = b""
-    p256_uncompressed_y: bytes = b""
-
-@dataclass
-class GNtbsCertDC:
-    id: int = 0
-    name: str = ""
-    cracaId: str = ""
-    crlSeries: int = 0
-    validityPeriod_start: int = 0
-    validityPeriod_duration: int = 0
-    appPermissions: List[GNpsidSsp] = field(default_factory=list)
-    symAlgEnc: int = 0
-    encPublicKey: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    verifyKeyIndicator: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-
-@dataclass
-class GNcertificateDC:
-    version: int = 0
-    type: int = 0
-    issuer: str = ""
-    tbs: GNtbsCertDC = field(default_factory=GNtbsCertDC)
-    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    signature_sSig: str = ""
-
-@dataclass
-class GNsignMaterial:
-    r: bytes = b""
-    s: bytes = b""
-
-@dataclass
-class EncData:
-    ciphertextWithTag: bytes = b""
-    encryptedKey: bytes = b""
-    ephemeralPublicKey: bytes = b""
-    x_value: bytes = b""
-    y_value: bytes = b""
-    eciesTag: bytes = b""
-    nonce: bytes = b""
-
-@dataclass
-class IniAT:
-    recipientAA: str = ""
-    aaCert1: str = ""
-    aaCert2: str = ""
-    aaCert3: str = ""
-    aaCert4: str = ""
-    bitmapCAM: str = ""
-    bitmapDENM: str = ""
-    eaIDstring: str = ""
-    itsID: str = ""
-    public_key_rfc: str = ""
-    private_key_rfc1: str = ""
-    private_key_rfc2: str = ""
-
-@dataclass 
-class tbsDataSigned:
-    protocolversion: int = 0
-    unsecuredData: str = ""
-    header_psid: int = 0
-    header_generationTime: int = 0
-
-@dataclass
-class eData:
-    recipient: str = ""
-    nonce: str = ""
-    ciphertext: str = ""
-
-@dataclass
-class sData:
-    hashID: int = 0
-    tbsdata: "tbsDataSigned" = field(default_factory=lambda: tbsDataSigned())
-    signer_digest: str = ""
-    rSig: GNecdsaNistP256 = field(default_factory=GNecdsaNistP256)
-    signature_sSig: str = ""
-
-@dataclass
-class contData:
-    signData: "sData" = field(default_factory=lambda: sData())
-    encrData: "eData" = field(default_factory=lambda: eData())
-    unsecuredData: str = ""
-
-@dataclass
-class cPacket:
-    m_protocolversion: int = 0
-    content: "contData" = field(default_factory=lambda: contData())
-
-@dataclass
-class response:
-    requestHash: str = ""
-    response_code: int = 0
-    certificate: GNcertificateDC = field(default_factory=GNcertificateDC)  # Fix: era GNecdsaNistP256
-
+from PKIManager.utils.security_models import (
+    EncData,
+    GNcertificateDC,
+    GNecdsaNistP256,
+    GNpsidSsp,
+    GNpublicKey,
+    GNsignMaterial,
+    GNtbsCertDC,
+    IniAT,
+    cPacket,
+    contData,
+    eData,
+    response,
+    sData,
+    tbsDataSigned,
+)
 
 class Security():
     def __init__(self):
@@ -384,12 +282,3 @@ class Security():
         ieeeData['content'] = ieeeContent
         encoded = self.encodeASN1('Ieee1609Dot2Data', ieeeData)
         return encoded
-
-
-            
-
-            
-            
-
-
-
