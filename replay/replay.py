@@ -60,6 +60,7 @@ def main():
     - --enable-pcap (bool): Whether to enable the pcap reproduction. Default is False. Can be activated by writing it.
     - --interface (str): The network interface to which write the pcap content. Default is "wlan0".
     - --pcap-filename (str): The pcap file to read from for pcap emulation. Default is "./data/pcap_output/trace.pcapng".
+    - --new-pcap-file (str): The new pcap file to write to. Default is "".
     - --update-datetime (bool): If the emulation of pcap trace must update the packets datetime to the current one. Default is False.
     - --enable-amqp (bool): Whether AMQP messaging is enabled. Default is False. Can be activated by writing it.
     - --amqp-server-ip (str): The IP address of the AMQP server. Default is 127.0.0.1.

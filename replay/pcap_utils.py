@@ -406,6 +406,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                                         zone["expiryTime"] = new_reference_time + delta
                             
                             if security_enabled and should_update_security:
+                                gen_loc = DecodedPacket["content"][1]["tbsData"]["headerInfo"]["generationLocation"]
                                 if StationID not in VehicleDict.keys():
                                     VehicleDict[StationID] = LastAssigned
                                     LastAssigned += 1
@@ -433,7 +434,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                                 if vehicle_key not in certificates or 'AT' not in certificates[vehicle_key]:
                                     raise KeyError(f"Missing AT certificate for vehicle {vehicle_key}")
                                 certificate = certificates[vehicle_key]['AT']
-                                SecuredPacket = security.createSecurePacket(bytes(UnsecuredDataUpdate), certificate, vehicle_idx, isCertificate, mtype)
+                                SecuredPacket = security.createSecurePacket(bytes(UnsecuredDataUpdate), certificate, vehicle_idx, isCertificate, mtype, gen_loc if mtype == "DENM" else None)
                                 new_pkt = EtherAndBasic + SecuredPacket
                             
                             if not should_update_security:

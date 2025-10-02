@@ -230,7 +230,7 @@ class Security():
             print(f"Error in getKeyFromCertificate: {e}")
             return None, None
 
-    def createSecurePacket(self, UnsecuredData: bytes, certificate: dict, vehicle_id: int , isCertificate: bool, mType: str) -> cPacket:
+    def createSecurePacket(self, UnsecuredData: bytes, certificate: dict, vehicle_id: int , isCertificate: bool, mType: str, gen_loc: bytes) -> cPacket:
         
         certficate_info = certificate['certificate']
         certificate_raw_hex = certificate['certificateRaw'] 
@@ -255,6 +255,7 @@ class Security():
         elif mType == 'DENM':
             tbs['headerInfo'] = {}
             tbs['headerInfo']['psid'] = 37
+            tbs["headerInfo"]["generationLocation"] = gen_loc
     
         m_generationTime = self.getCurrentTimestamp()
         tbs['headerInfo']['generationTime'] = m_generationTime

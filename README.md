@@ -159,7 +159,7 @@ sudo python3 record/record.py --enable-serial --device /dev/ttyACM0 --serial-fil
 
 Example of usage for the `replay` script:
 ```sh
-sudo python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface wlan1 --update-datetime --new-pcap-file new_pcap.pcapng --enable-amqp --amqp-server-ip 127.0.0.1 --amqp-server-port 5672 --amqp-topic tracenx --enable-CAN --CAN-device vcan0 --CAN-filename ./data/CANlog.json --CAN-db ./data/motohawk.db --enable-csv --csv-filename ./data/gnss_output/example1.csv --csv-interpolation
+sudo python3 replay/replay.py --enable-serial --serial-filename ./data/gnss_output/example1.json --server-device ./replay/ttyNewServer --client-device ./replay/ttyNewClient --baudrate 115200 --start-time 0 --end-time 10 --enable-gui --http-port 8080 --enable-pcap --interface wlan1 --pcap-filename capture.pcap --update-datetime --update-security --new-pcap-file new_pcap.pcapng --enable-amqp --amqp-server-ip 127.0.0.1 --amqp-server-port 5672 --amqp-topic tracenx --enable-CAN --CAN-device vcan0 --CAN-filename ./data/CANlog.json --CAN-db ./data/motohawk.db --enable-csv --csv-filename ./data/gnss_output/example1.csv --csv-interpolation
 ```
 
 ### Merge Traces
