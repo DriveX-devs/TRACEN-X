@@ -179,6 +179,10 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
 
     base_ts = pcap[0].time  # epoch time in seconds
 
+    # Flush the new_pcap if present
+    if new_pcap != "" and os.path.exists(new_pcap):
+        os.remove(new_pcap)
+
     if barrier:
         barrier.wait()
     
