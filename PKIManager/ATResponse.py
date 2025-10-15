@@ -1,24 +1,19 @@
 import os
 import hashlib
 import asn1tools
-import sys
 import glob
 import json
 
 from dataclasses import asdict, is_dataclass
-from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
-from cryptography.hazmat.backends import default_backend
-
 from cryptography.hazmat.primitives.serialization import (
     load_pem_public_key, load_der_public_key,
     load_pem_private_key, load_der_private_key,
-    Encoding, PublicFormat, PrivateFormat, NoEncryption
+    Encoding, PublicFormat
 )
-
-from cryptography.exceptions import InvalidKey
-from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature, Prehashed
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature, Prehashed
 
 
 from .INIReader import INIReader
