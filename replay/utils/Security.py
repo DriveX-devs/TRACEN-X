@@ -3,37 +3,23 @@ import hashlib
 import asn1tools
 import sys
 import glob
-import json
 import time
 
-from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers.aead import AESCCM
-from cryptography.hazmat.backends import default_backend
 
 from cryptography.hazmat.primitives.serialization import (
-    load_pem_public_key, load_der_public_key,
-    load_pem_private_key, load_der_private_key,
-    Encoding, PublicFormat, PrivateFormat, NoEncryption
+    load_pem_public_key,
+    load_pem_private_key,
+    Encoding, PublicFormat
 )
 
-from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature, Prehashed
 from PKIManager.utils.security_models import (
-    EncData,
-    GNcertificateDC,
-    GNecdsaNistP256,
-    GNpsidSsp,
+
     GNpublicKey,
     GNsignMaterial,
-    GNtbsCertDC,
-    IniAT,
     cPacket,
-    contData,
-    eData,
-    response,
-    sData,
-    tbsDataSigned,
 )
 
 class Security():

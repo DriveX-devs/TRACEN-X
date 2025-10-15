@@ -6,7 +6,6 @@ import sys
 from tqdm import tqdm
 from pathlib import Path
 from multiprocessing import Process, Event, Barrier
-
 from visualizer import Visualizer
 from csv_conversion_utils import csv_conversion
 from test_rate_utils import test_rate

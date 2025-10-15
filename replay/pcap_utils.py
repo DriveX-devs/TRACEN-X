@@ -4,6 +4,7 @@ import threading
 from typing import Any
 import asn1tools as asn
 from scapy.all import *
+from scapy.layers.l2 import Ether
 from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
@@ -450,7 +451,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
             assert new_pkt is not None, "Something went wrong in new packet building"
 
             if new_pcap != "":
-                wrpcap(new_pcap, new_pkt, append=True)
+                wrpcap(new_pcap, Ether(new_pkt), append=True)
             if sock:
                 try:
                     sock.send(new_pkt)
