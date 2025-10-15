@@ -2,8 +2,6 @@ import os
 import requests
 import hashlib
 import asn1tools
-import traceback
-import sys
 import time
 import glob
 import hmac
@@ -11,11 +9,10 @@ import hmac
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
-from cryptography.hazmat.backends import default_backend
 # ASN.1/OER: requires the original ASN.1 schema to generate the bindings
 from cryptography.hazmat.primitives.serialization import (
-    load_pem_public_key, load_der_public_key,
-    load_pem_private_key, load_der_private_key,
+    load_pem_public_key,
+    load_pem_private_key, 
     Encoding, PublicFormat, PrivateFormat, NoEncryption
 )
 
@@ -24,7 +21,6 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 
 from .INIReader import INIReader
-from .ECResponse import ECResponse
 from .CRReader import CRRReader
 from .utils.exceptions import SecurityError, SecurityConfigurationError
 from .utils.security_models import (

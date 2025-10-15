@@ -2,8 +2,6 @@ import os
 import requests
 import hashlib
 import asn1tools
-import traceback
-import sys
 import time
 import glob
 
@@ -24,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from .INIReader import INIReader
 from .CRReader import CRRReader
-from .ECResponse import ECResponse
+
 from .utils.exceptions import SecurityError, SecurityConfigurationError
 from .utils.security_models import (
     EncData,

@@ -1,7 +1,6 @@
 import os
 import hashlib
 import asn1tools
-import sys
 import glob
 import json
 

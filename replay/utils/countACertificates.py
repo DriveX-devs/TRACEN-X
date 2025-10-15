@@ -16,6 +16,10 @@ def getCurrentTimestamp32() -> int:
     # Emulates the uint32_t cast from the C++ code (wrap modulo 2^32)
     return tai_seconds_since_2004 & 0xFFFFFFFF
 
+def _define_dict(maxCertificates: int) -> Dict[str, Tuple[bool, bool]]:
+    """Helper to define a dictionary with keys from 0 to maxCertificates-1 and values (False, False)."""
+    return {str(i): (False, False) for i in range(maxCertificates)}
+
 
 def _evaluate_certificate(certificate_data: Any, reference_time: int) -> Tuple[bool, bool]:
     """Return (is_valid_now, is_expired_or_invalid) for a certificate payload."""
@@ -62,8 +66,9 @@ def count_active_certificates(certificates_path: Union[str, Path] = "PKIManager/
         
 
     now = getCurrentTimestamp32()
-    validity_by_vehicle: Dict[str, Tuple[bool, bool]] = {}
+    validity_by_vehicle = _define_dict(maxCertificates) if maxCertificates > 0 else {}
     should_persist = False
+
 
     for vehicle_id, certificate_bundle in list(certificates.items()):
         if not isinstance(certificate_bundle, dict):

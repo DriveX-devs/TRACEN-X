@@ -9,7 +9,7 @@ PKIManager/certificates/requests/*
 PKIManager/certificates/responses/*
 PKIManager/certificates/credentials.json
 PKIManager/certificates/certificates.json
-
+PKIManager/certificates/NotToShare
 *.DS_Store
 
 venv/
