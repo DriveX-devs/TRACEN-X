@@ -156,16 +156,19 @@ class DecodedMessage:
         """
         Returns the UBX message type.
         """
-        if(len(content)>=4):
-            if(content[2]==0x01 and content[3]==0x05):
-                return "NAV-PVT"
-            elif(content[2]==0x01 and content[3]==0x07):
-                return "NAV-ATT"
-            elif(content[2]==0x10 and content[3]==0x15):
-                return "ESF-INS"
-            elif(content[2]==0x10 and content[3]==0x03):
-                return "ESF-RAW"
-            elif(content[2]==0x01 and content[3]==0x03):
-                return "NAV-STATUS"
-        else:
-            return None
+        if len(content) >= 4:
+            cls, mid = content[2], content[3]
+
+            if cls == 0x01 and mid == 0x07:
+                return "NAV-PVT"         # Navigation Position Velocity Time Solution (contains full date/time)
+            elif cls == 0x01 and mid == 0x21:
+                return "NAV-TIMEUTC"     # UTC Time Solution (contains full date/time)
+            elif cls == 0x01 and mid == 0x05:
+                return "NAV-ATT"         # Attitude
+            elif cls == 0x10 and mid == 0x15:
+                return "ESF-INS"         # Inertial solution
+            elif cls == 0x10 and mid == 0x03:
+                return "ESF-RAW"         # Raw inertial measurements
+            elif cls == 0x01 and mid == 0x03:
+                return "NAV-STATUS"      # Status message
+        return None

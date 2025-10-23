@@ -8,8 +8,8 @@ from scapy.layers.l2 import Ether
 from proton import Message
 from proton.reactor import Container
 from proton.handlers import MessagingHandler
-from utils import countCertificates
-from utils.Security import Security
+from security_utils import countCertificates
+from security_utils.Security import Security
 import glob
 
 # Normal packet (without security layer) constants

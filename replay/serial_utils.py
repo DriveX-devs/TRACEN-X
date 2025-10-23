@@ -1,8 +1,11 @@
 import time
 import json
 import sys
+import struct
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
+from decoded_messages import DecodedMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -43,6 +46,8 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
 
         first_send = None
 
+        decoder = DecodedMessage()
+
         if barrier:
             barrier.wait()  # Ensure all processes start at the same time
 
@@ -72,10 +77,25 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
                 continue
             content = d["data"]
             if message_type == "UBX":
-                content = bytes.fromhex(content)
-            else:
-                # For the NMEA messages we need to encode the content for the serial emulator and decode it for the GUI (to obtain a string)
-                content = content.encode()
+                raw_bytes = bytearray.fromhex(content)
+                msg_type = decoder.get_ubx_message_type(raw_bytes)
+                if msg_type in ["NAV-PVT", "NAV-TIMEUTC"]:
+                    now = datetime.now(timezone.utc)
+                    raw_bytes[14:16] = struct.pack("<H", now.year)
+                    raw_bytes[16] = now.month
+                    raw_bytes[17] = now.day
+                    raw_bytes[18] = now.hour
+                    raw_bytes[19] = now.minute
+                    raw_bytes[20] = now.second
+                content = bytes(raw_bytes)
+            elif message_type == "NMEA":
+                s = content.strip()
+                if s.startswith(("$GPRMC", "$GNRMC", "$GNRMC")):
+                    parts = s.split(',')
+                    if len(parts) > 9 and len(parts[9]) == 6:
+                        parts[9] = datetime.now(timezone.utc).strftime("%d%m%y")
+                        s = ",".join(parts)
+                content = s.encode()
 
             ser.write(content)
             if first_send is None:
