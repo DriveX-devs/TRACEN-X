@@ -1,10 +1,17 @@
 import time
 import json
-import utils
+import sys
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import utils
 from serial_emulator import SerialEmulator
 
-def write_serial(stop_event: Any, server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):
+def write_serial(barrier: Any, stop_event: Any, server_device: str, client_device: str, baudrate: int, input_filename: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the serial device.
 
@@ -35,6 +42,10 @@ def write_serial(stop_event: Any, server_device: str, client_device: str, baudra
         start_time_us = start_time if start_time else 0
 
         first_send = None
+
+        if barrier:
+            barrier.wait()  # Ensure all processes start at the same time
+
         startup_time = time.time() * 1e6
         for d in data:
             delta_time = d["timestamp"] - previous_time

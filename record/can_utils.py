@@ -6,7 +6,7 @@ import traceback
 from collections import deque
 from typing import Any
 
-def read_CAN_bus(stop_event: Any, CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
+def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
     """
     Reads the CAN bus and writes the messages to a file.
 
@@ -27,6 +27,8 @@ def read_CAN_bus(stop_event: Any, CAN_device: str, CAN_filename: str, CAN_db: st
         message_ids = [m.frame_id for m in db_can.messages]
         flat_time_setted = False
         flat_time = None
+        if barrier:
+            barrier.wait()
         if CAN_log_file_source is None:
             can_bus = can.interface.Bus(channel=CAN_device, interface='socketcan')
             # Set the flat time to the current time if the log file source is the CAN bus

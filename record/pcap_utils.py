@@ -1,7 +1,7 @@
 from scapy.all import sniff, wrpcap
 from typing import Any
 
-def sniff_pkt(stop_event: Any, pcap_filename: str, interface: str):
+def sniff_pkt(barrier: Any, stop_event: Any, pcap_filename: str, interface: str):
     """
     Reads data from a network interface and writes the packets into a .pcap file.
 
@@ -13,6 +13,9 @@ def sniff_pkt(stop_event: Any, pcap_filename: str, interface: str):
     - real_time (bool): Enable real-time serial emulation.
     """
     try:
+        if barrier:
+            barrier.wait()
+        print(f"Sniffing on interface {interface}...")
         capture = sniff(iface=interface, stop_filter=lambda x: stop_event.is_set())
         print("Number of packets sniffed: ", len(capture))
         wrpcap(pcap_filename, capture)

@@ -278,7 +278,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
             visualizer.stop_server(server_ip, server_port)
 
 
-def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
+def serial_gui(barrier: Any, stop_event: Any, input_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str,
                visualizer: Visualizer, CAN_filename: str = None, CAN_db: str = None, pcap_filename: str = None):
     """
     GUI function to display the data on the map.
@@ -313,6 +313,10 @@ def serial_gui(stop_event: Any, input_filename: str, start_time: int, end_time: 
         variable_delta_us_factor = 0
 
         first_send = None
+
+        if barrier:
+            barrier.wait() # Synchronize the start of the processes
+
         startup_time = time.time() * 1e6
 
         # If CAN GUI is enabled, start the CAN GUI function in a separate thread

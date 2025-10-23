@@ -5,7 +5,7 @@ import time
 import json
 from typing import Any
 
-def write_CAN(stop_event: Any, device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
+def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
     """
     Writes the data from the file to the CAN device.
 
@@ -32,6 +32,10 @@ def write_CAN(stop_event: Any, device: str, input_filename: str, db_file: str, s
         bus = can.interface.Bus(channel=device, interface='socketcan')
         previous_time = 0 if not start_time else start_time
         variable_delta_us_factor = 0
+
+        if barrier:
+            barrier.wait()
+        
         startup_time = time.time() * 1e6
         for d in data:
             delta_time = d["timestamp"] - previous_time

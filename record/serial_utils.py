@@ -9,7 +9,7 @@ sys.path.insert(1, './serial_emulator')
 
 from serial_emulator import SerialEmulator
 
-def read_serial(stop_event: Any, serial_filename: str, ser: serial.Serial, end_time: int, real_time: bool):
+def read_serial(barrier: Any, stop_event: Any, serial_filename: str, ser: serial.Serial, end_time: int, real_time: bool):
     """
     Reads data from a serial device and writes the messages to a file.
 
@@ -33,6 +33,9 @@ def read_serial(stop_event: Any, serial_filename: str, ser: serial.Serial, end_t
     serial_device = None
     if real_time:
         serial_device = SerialEmulator(device_port='/dev/ttyTestDevice', client_port='/dev/ttyTestClient', baudrate=115200)
+
+    if barrier:
+        barrier.wait()
 
     print('Recording GNSS...');
     if end_time is not None:
