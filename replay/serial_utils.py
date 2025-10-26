@@ -7,6 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 from decoded_messages import DecodedMessage
 
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -47,7 +48,6 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
         first_send = None
 
         decoder = DecodedMessage()
-
         if barrier:
             barrier.wait()  # Ensure all processes start at the same time
 

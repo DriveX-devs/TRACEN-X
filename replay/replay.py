@@ -16,6 +16,7 @@ from pcap_utils import write_pcap
 from security_utils import countCertificates
 from security_utils import count_active_certificates
 
+
 # Make sure sibling packages like PKIManager are importable when run as a script.
 project_root = str(Path(__file__).resolve().parents[1])
 if project_root not in sys.path:
