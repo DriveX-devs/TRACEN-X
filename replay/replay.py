@@ -13,8 +13,9 @@ from can_utils import write_CAN
 from gui_utils import serial_gui
 from serial_utils import write_serial
 from pcap_utils import write_pcap
-from utils import countCertificates
-from utils import count_active_certificates
+from security_utils import countCertificates
+from security_utils import count_active_certificates
+
 
 # Make sure sibling packages like PKIManager are importable when run as a script.
 project_root = str(Path(__file__).resolve().parents[1])
