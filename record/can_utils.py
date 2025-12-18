@@ -1,6 +1,4 @@
 import utils
-import can
-import cantools
 import time
 import traceback
 from collections import deque
@@ -18,6 +16,8 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
     - CAN_log_file_source (bool): Wheather the source of the CAN log file is the CAN bus or a file.
     - end_time (int): The time to stop reading in seconds.
     """
+    import can
+    import cantools
     can_messages = deque()
     can_bus = None
     try:
