@@ -1,12 +1,7 @@
-import serial
 import argparse
 import signal
-from multiprocessing import Process, Event, Barrier
 import os
-from pcap_utils import sniff_pkt
-from serial_utils import read_serial
-from can_utils import read_CAN_bus
-import utils
+from multiprocessing import Process, Event, Barrier
 
 def signal_handler(sig, frame, stop_event):
     """
@@ -76,10 +71,14 @@ def main():
 
     num_barriers = 0
     if enable_serial:
+        import serial
+        from serial_utils import read_serial
         num_barriers += 1
     if enable_CAN:
+        from can_utils import read_CAN_bus
         num_barriers += 1
     if enable_pcap:
+        from pcap_utils import sniff_pkt
         num_barriers += 1
     
     barrier = Barrier(num_barriers) if num_barriers > 1 else None

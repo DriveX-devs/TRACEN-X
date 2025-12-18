@@ -1,4 +1,3 @@
-import utils
 import json
 import math
 import time
@@ -10,6 +9,7 @@ from visualizer import Visualizer
 from scapy.all import *
 import asn1tools as asn
 from typing import Any
+from utils import filter_by_start_time, STANDARD_OBJECT_LENGTH, BUMPER_TO_SENSOR_DISTANCE
 
 MAP_OPENED = False
 BTP_LOW = 40
@@ -190,7 +190,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
         f.close()
         # Filter the data by the start time
         if start_time:
-            data = utils.filter_by_start_time(data, start_time)
+            data = filter_by_start_time(data, start_time)
         # Load the CAN database
         db = cantools.database.load_file(CAN_db)
         previous_time = 0 if not start_time else start_time
@@ -241,7 +241,7 @@ def CAN_gui(CAN_filename: str, CAN_db: str, start_time: int, end_time: int, serv
                         angle_left = content[angle_left_signal.name]
                         angle_right = content[angle_right_signal.name]
                         # Calculate the position of the object
-                        dx_v = distance - utils.BUMPER_TO_SENSOR_DISTANCE + utils.STANDARD_OBJECT_LENGTH / 2
+                        dx_v = distance - BUMPER_TO_SENSOR_DISTANCE + STANDARD_OBJECT_LENGTH / 2
                         dist_left = dx_v / math.cos(angle_left)
                         dist_right = dx_v / math.cos(angle_right)
                         dy_left = dist_left * math.sin(angle_left)
@@ -304,7 +304,7 @@ def serial_gui(barrier: Any, stop_event: Any, input_filename: str, start_time: i
         f.close()
 
         if start_time:
-            data = utils.filter_by_start_time(data, start_time)
+            data = filter_by_start_time(data, start_time)
 
         previous_time = 0 if not start_time else start_time
         latitude = None

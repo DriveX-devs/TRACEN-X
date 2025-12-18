@@ -1,16 +1,13 @@
 import socket
 import time
+import glob
+import os
 import threading
 from typing import Any
 import asn1tools as asn
-from scapy.all import *
+from scapy.utils import rdpcap, wrpcap
+from scapy.packet import raw
 from scapy.layers.l2 import Ether
-from proton import Message
-from proton.reactor import Container
-from proton.handlers import MessagingHandler
-from security_utils import countCertificates
-from security_utils.Security import Security
-import glob
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
@@ -34,46 +31,6 @@ vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
 denm_asn = "./data/asn/DENM-all-old.asn"
 security_folder = "./data/asn/security/"
-
-class AMQPSender(MessagingHandler):
-    def __init__(self, server, port, topic):
-        super().__init__()
-        self.server = server
-        self.port = port
-        self.topic = topic
-        self.sender = None
-        self.container = Container(self)
-
-    def on_start(self, event) -> None:
-        try:
-            conn = event.container.connect(f"{self.server}:{self.port}")
-            self.sender = event.container.create_sender(conn, "topic://" + self.topic)
-        except Exception as e:
-            print(f"Error: {e}")
-            exit(-1)
-
-    def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
-        success = True
-        try:
-            if self.sender:
-                msg = Message(
-                    id=message_id,
-                    body=raw_bytes,
-                    properties=properties or {},
-                    content_type="application/octet-stream"
-                )
-                self.sender.send(msg)
-        except Exception as e:
-            print(f"Sending error: {e}")
-            success = False
-        finally:
-            return success
-
-    def run(self) -> None:
-        self.container.run()
-
-    def stop(self) -> None:
-        self.container.stop()
 
 
 def compute_properties(security_enabled: bool = None, port: int = None, StationID: int = None) -> dict:
@@ -146,6 +103,50 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
     - amqp_topic (str): Topic to publish messages to on the AMQP server
     """
 
+    if enable_amqp:
+        from proton import Message
+        from proton.reactor import Container
+        from proton.handlers import MessagingHandler
+        class AMQPSender(MessagingHandler):
+            def __init__(self, server, port, topic):
+                super().__init__()
+                self.server = server
+                self.port = port
+                self.topic = topic
+                self.sender = None
+                self.container = Container(self)
+
+            def on_start(self, event) -> None:
+                try:
+                    conn = event.container.connect(f"{self.server}:{self.port}")
+                    self.sender = event.container.create_sender(conn, "topic://" + self.topic)
+                except Exception as e:
+                    print(f"Error: {e}")
+                    exit(-1)
+
+            def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
+                success = True
+                try:
+                    if self.sender:
+                        msg = Message(
+                            id=message_id,
+                            body=raw_bytes,
+                            properties=properties or {},
+                            content_type="application/octet-stream"
+                        )
+                        self.sender.send(msg)
+                except Exception as e:
+                    print(f"Sending error: {e}")
+                    success = False
+                finally:
+                    return success
+
+            def run(self) -> None:
+                self.container.run()
+
+            def stop(self) -> None:
+                self.container.stop()
+
     CPM = asn.compile_files(cpm_asn, "uper")
     VAM = asn.compile_files(vam_asn, "uper")
     CAM = asn.compile_files(cam_asn, "uper")
@@ -153,7 +154,6 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
     asn_files = glob.glob(os.path.join(security_folder, "*.asn"))
     SECURITY = asn.compile_files(asn_files, 'oer')
     
-    security = Security()
     LastAssigned = 0
     VehicleDict = {}
 
@@ -243,6 +243,8 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                         # Take the rest of the packet (Facilities layer)
                         facilities = data[BTP_HIGH:]
                     else:
+                        from security_utils.Security import Security
+                        security = Security()
                         pack = raw(pkt)
                         EtherAndBasic = pack[:ETHER_LENGTH+BASICHEADER]
                         DecodedPacket = SECURITY.decode("Ieee1609Dot2Data", pack[18:])

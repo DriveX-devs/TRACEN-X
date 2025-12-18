@@ -3,24 +3,8 @@ import os
 import signal
 import json
 import sys
-from tqdm import tqdm
 from pathlib import Path
 from multiprocessing import Process, Event, Barrier
-from visualizer import Visualizer
-from csv_conversion_utils import csv_conversion
-from test_rate_utils import test_rate
-from can_utils import write_CAN
-from serial_utils import write_serial
-from pcap_utils import write_pcap
-from security_utils import countCertificates
-from security_utils import count_active_certificates
-
-
-# Make sure sibling packages like PKIManager are importable when run as a script.
-project_root = str(Path(__file__).resolve().parents[1])
-if project_root not in sys.path:
-    sys.path.append(project_root)
-from PKIManager import ATManager, ATResponse, ECManager, ECResponse
 
 def signal_handler(sig, frame, stop_event):
     """
@@ -104,7 +88,7 @@ def main():
 
     args = args.parse_args()
     
-    serial = args.enable_serial
+    enable_serial = args.enable_serial
     serial_filename = args.serial_filename
     server_device = args.server_device
     client_device = args.client_device
@@ -120,9 +104,9 @@ def main():
     server_ip = args.visualizer_server_ip
     server_port = args.visualizer_server_port
 
-    test_rate_enabled = args.enable_test_rate
+    enable_test_rate = args.enable_test_rate
 
-    CAN = args.enable_CAN
+    enable_CAN = args.enable_CAN
     # CAN = True # For testing purposes
     CAN_db = args.CAN_db
     # CAN_db = "./data/can_db/PCAN.dbc" # For testing purposes
@@ -130,7 +114,7 @@ def main():
     CAN_filename = args.CAN_filename
     # CAN_filename = "./data/can_output/CANlog.json" # For testing purposes
 
-    csv = args.enable_csv
+    enable_csv = args.enable_csv
     csv_filename = args.csv_filename
     csv_interpolation = args.csv_interpolation
 
@@ -148,23 +132,37 @@ def main():
     update_security = args.update_security
     certificates = None
 
-    assert serial > 0 or enable_serial_gui > 0 or test_rate_enabled > 0 or CAN > 0 or csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
-    CERT_PATH = Path(__file__).resolve().parents[1] / "PKIManager" / "certificates" / "certificates.json"
+    assert enable_serial > 0 or enable_serial_gui > 0 or enable_test_rate > 0 or enable_CAN > 0 or enable_csv > 0 or enable_pcap > 0, "At least one of the serial or GUI or test rate or CAN or csv options must be activated"
     if start_time and end_time:
         assert end_time > start_time
     
     num_barriers = 0
-    if serial:
+    if enable_serial:
+        from serial_utils import write_serial
         num_barriers += 1
-    if CAN:
+    if enable_CAN:
+        from can_utils import write_CAN
         num_barriers += 1
     if enable_pcap > 0:
+        from pcap_utils import write_pcap
         num_barriers += 1
-    if test_rate_enabled > 0:
+        if update_security and update_datetime:
+            # Make sure sibling packages like PKIManager are importable when run as a script.
+            project_root = str(Path(__file__).resolve().parents[1])
+            if project_root not in sys.path:
+                sys.path.append(project_root)
+            from PKIManager import ATManager, ATResponse, ECManager, ECResponse
+            from security_utils import countCertificates
+            from security_utils import count_active_certificates
+    if enable_test_rate > 0:
+        from test_rate_utils import test_rate
         num_barriers += 1
-    if csv > 0:
+    if enable_csv > 0:
+        from csv_conversion_utils import csv_conversion
         num_barriers += 1
     if enable_serial_gui > 0:
+        from visualizer import Visualizer
+        from gui_utils import serial_gui
         num_barriers += 1
 
     # Initialize a barrier if more than one process needs to be synchronized
@@ -182,68 +180,7 @@ def main():
     stop_event = Event()
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
-
-    if enable_pcap and update_datetime and update_security:
-        certificates = countCertificates(pcap_filename, args.start_time, args.end_time)
-        print(f"The pcap file contains {certificates} certificates")
-        credentials_path = CERT_PATH.parent / "credentials.json"
-        with open(credentials_path, "r", encoding="utf-8") as credentials_file:
-            credentials_data = json.load(credentials_file)
-        credential_count = len(credentials_data.get("vehicles", {}))
-        active_certificates = count_active_certificates(CERT_PATH, maxCertificates=credential_count)
-        
-        for key in tqdm(active_certificates.keys(), desc="Processing certificates"):
-            ECisValid, ATisValid = active_certificates[key]
-            if not ECisValid:
-                # ask EC and AT certificates
-                manager = ECManager()  
-                response = ECResponse()
-                atManager = ATManager()
-                atResponse = ATResponse()
-                
-                manager.regeneratePEM(key)
-                manager.createRequest(key)
-                response_file = manager.sendPOST(key)
-                try:
-                    response.getECResponse(key)
-                except RuntimeError as exc:
-                    print(f"[ERR] {exc}", file=sys.stderr)
-                    sys.exit(1)
-
-                ec = response.m_ecBytesStr
-                atManager.m_ECHex = ec
-                atManager.regeneratePEM(key)
-                atManager.createRequest(key)
-                atManager.sendPOST(key)
-                atResponse.getATResponse(key)
-
-            elif ECisValid and not ATisValid:
-                response = ECResponse()
-                atManager = ATManager()
-                atResponse = ATResponse()
-
-                try:
-                    response.getECResponse(key)
-                except RuntimeError as exc:
-                    print(f"[ERR] {exc}", file=sys.stderr)
-                    sys.exit(1)
-                ec = response.m_ecBytesStr
-                atManager.m_ECHex = ec
-                atManager.regeneratePEM(key)
-                atManager.createRequest(key)
-                atManager.sendPOST(key)
-                atResponse.getATResponse(key)
-        if certificates > len(active_certificates):
-            print(f"There are not enough active certificates. There are {len(active_certificates)} active certificates.")
-            print("Please add new certificates before starting the pcap emulation.")
-            exit(1)
-        # load json file with the certificates
-        filePath = CERT_PATH
-        with open(filePath, 'r') as f:
-            certificates = json.load(f)
-        print(f"Loaded {len(certificates)} certificates from {filePath}")
-
-    if serial:
+    if enable_serial:
         assert os.path.exists(serial_filename), "The file does not exist"
         serial_process = Process(
             target=write_serial, args=(barrier, stop_event, server_device, client_device, baudrate, serial_filename, start_time, end_time)
@@ -256,7 +193,6 @@ def main():
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
 
     if enable_serial_gui:
-        from gui_utils import serial_gui
         assert os.path.exists(serial_filename), "The file does not exist"
         # Creation of the visualizer object
         visualizer = Visualizer()
@@ -288,18 +224,18 @@ def main():
 
         gui_process.start()
     
-    if CAN:
+    if enable_CAN:
         assert os.path.exists(CAN_filename), "The file does not exist"
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
         can_process = Process(target=write_CAN, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
         can_process.start()
 
-    if test_rate_enabled:
+    if enable_test_rate:
         assert os.path.exists(serial_filename), "The file does not exist"
         test_rate_process = Process(target=test_rate, args=(barrier, stop_event, serial_filename, start_time, end_time))
         test_rate_process.start()
     
-    if csv:
+    if enable_csv:
         assert os.path.exists(serial_filename), "The file does not exist"
         # Ask the user to insert the agent type
         agent_type = input("Insert the agent type (car, vru): ")
@@ -312,24 +248,84 @@ def main():
         csv_process.start()
 
     if enable_pcap:
+        if update_datetime and update_security:
+            CERT_PATH = Path(__file__).resolve().parents[1] / "PKIManager" / "certificates" / "certificates.json"
+            certificates = countCertificates(pcap_filename, args.start_time, args.end_time)
+            print(f"The pcap file contains {certificates} certificates")
+            credentials_path = CERT_PATH.parent / "credentials.json"
+            with open(credentials_path, "r", encoding="utf-8") as credentials_file:
+                credentials_data = json.load(credentials_file)
+            credential_count = len(credentials_data.get("vehicles", {}))
+            active_certificates = count_active_certificates(CERT_PATH, maxCertificates=credential_count)
+            
+            for key in active_certificates.keys():
+                ECisValid, ATisValid = active_certificates[key]
+                if not ECisValid:
+                    # ask EC and AT certificates
+                    manager = ECManager()  
+                    response = ECResponse()
+                    atManager = ATManager()
+                    atResponse = ATResponse()
+                    
+                    manager.regeneratePEM(key)
+                    manager.createRequest(key)
+                    response_file = manager.sendPOST(key)
+                    try:
+                        response.getECResponse(key)
+                    except RuntimeError as exc:
+                        print(f"[ERR] {exc}", file=sys.stderr)
+                        sys.exit(1)
+
+                    ec = response.m_ecBytesStr
+                    atManager.m_ECHex = ec
+                    atManager.regeneratePEM(key)
+                    atManager.createRequest(key)
+                    atManager.sendPOST(key)
+                    atResponse.getATResponse(key)
+
+                elif ECisValid and not ATisValid:
+                    response = ECResponse()
+                    atManager = ATManager()
+                    atResponse = ATResponse()
+
+                    try:
+                        response.getECResponse(key)
+                    except RuntimeError as exc:
+                        print(f"[ERR] {exc}", file=sys.stderr)
+                        sys.exit(1)
+                    ec = response.m_ecBytesStr
+                    atManager.m_ECHex = ec
+                    atManager.regeneratePEM(key)
+                    atManager.createRequest(key)
+                    atManager.sendPOST(key)
+                    atResponse.getATResponse(key)
+            if certificates > len(active_certificates):
+                print(f"There are not enough active certificates. There are {len(active_certificates)} active certificates.")
+                print("Please add new certificates before starting the pcap emulation.")
+                exit(1)
+            # load json file with the certificates
+            filePath = CERT_PATH
+            with open(filePath, 'r') as f:
+                certificates = json.load(f)
+            print(f"Loaded {len(certificates)} certificates from {filePath}")
         assert os.path.exists(pcap_filename)
         pcap_process = Process(target=write_pcap, args=(barrier, stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
         pcap_process.start()
 
     try:
-        if serial:
+        if enable_serial:
             serial_process.join()
 
         if enable_serial_gui:
             gui_process.join()
 
-        if CAN:
+        if enable_CAN:
             can_process.join()
         
-        if test_rate_enabled:
+        if enable_test_rate:
             test_rate_process.join()
         
-        if csv:
+        if enable_csv:
             csv_process.join()
 
         if enable_pcap:
@@ -338,11 +334,11 @@ def main():
     except KeyboardInterrupt:
         print("Interrupted by user")
         stop_event.set()
-        if serial_process: serial_process.join()
+        if enable_serial: serial_process.join()
         if enable_serial_gui: gui_process.join()
-        if CAN: can_process.join()
-        if test_rate_enabled: test_rate_process.join()
-        if csv: csv_process.join()
+        if enable_CAN: can_process.join()
+        if enable_test_rate: test_rate_process.join()
+        if enable_csv: csv_process.join()
         if pcap_process: pcap_process.join()
         
 

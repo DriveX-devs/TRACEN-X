@@ -1,6 +1,4 @@
-import utils
-import can
-import cantools
+from utils import filter_by_start_time
 import time
 import json
 from typing import Any
@@ -18,6 +16,8 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
     - end_time (int): The end time (in microseconds) relative to the beginning of the capture; messages after this time will be ignored.
 
     """
+    import can
+    import cantools
     try:
         first_send = None
         f = open(input_filename, "r")
@@ -25,7 +25,7 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
         f.close()
         # Filter the data by the start time
         if start_time:
-            data = utils.filter_by_start_time(data, start_time)
+            data = filter_by_start_time(data, start_time)
         # Load the CAN database
         db = cantools.database.load_file(db_file)
         # Create the CAN bus

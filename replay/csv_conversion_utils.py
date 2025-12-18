@@ -1,4 +1,4 @@
-import utils
+from utils import filter_by_start_time, SPEED_THRESHOLD, AGE_THRESHOLD, METERS_PER_DEGREE_LATITUDE
 import json
 import math
 import time
@@ -37,7 +37,7 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
     }
 
     if start_time:
-        data = utils.filter_by_start_time(data, start_time)
+        data = filter_by_start_time(data, start_time)
 
     last_update_pos = None
     i = 0
@@ -79,19 +79,19 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
             continue
 
         if csv_interpolation and speed and last_update_pos:
-            if speed > utils.SPEED_THRESHOLD and (d["timestamp"] - last_update_pos) / 1e3 > utils.AGE_THRESHOLD:
+            if speed > SPEED_THRESHOLD and (d["timestamp"] - last_update_pos) / 1e3 > AGE_THRESHOLD:
                 pos_age = d["timestamp"] - last_update_pos
                 pos_age /= 1e3
-                interp_points = math.floor(pos_age / utils.AGE_THRESHOLD)
+                interp_points = math.floor(pos_age / AGE_THRESHOLD)
                 heading_diff = heading - last_heading if last_heading else 0
                 for j in range(0, int(interp_points)):
-                    t = last_update_pos + (j+1) * (utils.AGE_THRESHOLD * 1e3)
+                    t = last_update_pos + (j+1) * (AGE_THRESHOLD * 1e3)
                     delta_t = (t - last_update_pos) / 1e6
                     new_heading = last_heading + j * (heading_diff / interp_points)
                     delta_x = speed * delta_t * math.sin(new_heading)
                     delta_y = speed * delta_t * math.cos(new_heading)
-                    new_lat = lat + (delta_y / utils.METERS_PER_DEGREE_LATITUDE)
-                    new_lon = lon + (delta_x / (utils.METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(lat))))
+                    new_lat = lat + (delta_y / METERS_PER_DEGREE_LATITUDE)
+                    new_lon = lon + (delta_x / (METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(lat))))
                     interp_lat = new_lat
                     if not tmp_lat:
                         lat = interp_lat
