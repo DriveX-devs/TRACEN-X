@@ -10,7 +10,6 @@ from visualizer import Visualizer
 from csv_conversion_utils import csv_conversion
 from test_rate_utils import test_rate
 from can_utils import write_CAN
-from gui_utils import serial_gui
 from serial_utils import write_serial
 from pcap_utils import write_pcap
 from security_utils import countCertificates
@@ -257,6 +256,7 @@ def main():
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
 
     if enable_serial_gui:
+    	from gui_utils import serial_gui
         assert os.path.exists(serial_filename), "The file does not exist"
         # Creation of the visualizer object
         visualizer = Visualizer()
