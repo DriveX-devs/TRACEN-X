@@ -256,7 +256,7 @@ def main():
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
 
     if enable_serial_gui:
-    	from gui_utils import serial_gui
+        from gui_utils import serial_gui
         assert os.path.exists(serial_filename), "The file does not exist"
         # Creation of the visualizer object
         visualizer = Visualizer()
