@@ -186,7 +186,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
 
     if barrier:
         try:
-            barrier.wait(timeout=2)
+            barrier.wait()
         except BrokenBarrierError:
             return
     

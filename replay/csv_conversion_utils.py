@@ -53,7 +53,7 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
 
     if barrier:
         try:
-            barrier.wait(timeout=2)
+            barrier.wait()
         except BrokenBarrierError:
             return
 

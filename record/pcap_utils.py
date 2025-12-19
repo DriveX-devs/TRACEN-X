@@ -1,5 +1,6 @@
 from scapy.all import sniff, wrpcap
 from typing import Any
+from threading import BrokenBarrierError
 
 def sniff_pkt(barrier: Any, stop_event: Any, pcap_filename: str, interface: str):
     """
@@ -14,7 +15,10 @@ def sniff_pkt(barrier: Any, stop_event: Any, pcap_filename: str, interface: str)
     """
     try:
         if barrier:
-            barrier.wait()
+            try:
+                barrier.wait()
+            except BrokenBarrierError:
+                return
         print(f"Sniffing on interface {interface}...")
         capture = sniff(iface=interface, stop_filter=lambda x: stop_event.is_set())
         print("Number of packets sniffed: ", len(capture))

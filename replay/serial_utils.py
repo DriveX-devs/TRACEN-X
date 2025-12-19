@@ -53,7 +53,7 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
         decoder = DecodedMessage()
         if barrier:
             try:
-                barrier.wait(timeout=2)
+                barrier.wait()
             except BrokenBarrierError:
                 print("Error: BrokenBarrier")
                 return

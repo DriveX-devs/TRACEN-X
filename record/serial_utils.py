@@ -4,6 +4,7 @@ import serial
 import time
 from collections import deque
 from typing import Any
+from threading import BrokenBarrierError
 
 sys.path.insert(1, './serial_emulator')
 
@@ -35,7 +36,10 @@ def read_serial(barrier: Any, stop_event: Any, serial_filename: str, ser: serial
         serial_device = SerialEmulator(device_port='/dev/ttyTestDevice', client_port='/dev/ttyTestClient', baudrate=115200)
 
     if barrier:
-        barrier.wait()
+        try:
+            barrier.wait()
+        except BrokenBarrierError:
+            return
 
     print('Recording GNSS...');
     if end_time is not None:
@@ -45,6 +49,8 @@ def read_serial(barrier: Any, stop_event: Any, serial_filename: str, ser: serial
         first_message = True
         flat_time = time.time() * 1e6
         while True:
+            if stop_event.is_set():
+                break
             data = ser.read(size=1)
             if real_time:
                 serial_device.write(data)
@@ -108,7 +114,7 @@ def read_serial(barrier: Any, stop_event: Any, serial_filename: str, ser: serial
             else:
                 queue += data
             t = time.time()
-            if (end_time is not None and t > end_time) or stop_event.is_set():
+            if (end_time is not None and t > end_time):
                 break
             previous_data = data
     except Exception as e:
@@ -118,4 +124,5 @@ def read_serial(barrier: Any, stop_event: Any, serial_filename: str, ser: serial
         print("Writing GNSS messages to file...")
         utils.write_to_file(f, messages)
         print("Closing serial port...")
-        ser.close()
+        if ser:
+            ser.close()

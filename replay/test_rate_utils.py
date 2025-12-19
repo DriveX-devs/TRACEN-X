@@ -84,7 +84,7 @@ def test_rate(barrier: Any, stop_event: Any, filename: str, start_time: int, end
 
     if barrier:
         try:
-            barrier.wait(timeout=2)
+            barrier.wait()
         except BrokenBarrierError:
             return
 

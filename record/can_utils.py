@@ -3,6 +3,7 @@ import time
 import traceback
 from collections import deque
 from typing import Any
+from threading import BrokenBarrierError
 
 def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: str, CAN_db: str, CAN_log_file_source: str, end_time: int):
     """
@@ -28,7 +29,10 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
         flat_time_setted = False
         flat_time = None
         if barrier:
-            barrier.wait()
+            try:
+                barrier.wait()
+            except BrokenBarrierError:
+                return
         if CAN_log_file_source is None:
             can_bus = can.interface.Bus(channel=CAN_device, interface='socketcan')
             # Set the flat time to the current time if the log file source is the CAN bus
@@ -36,6 +40,8 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
             flat_time = time.time() * 1e6
             flat_time_setted = True
             while True:
+                if stop_event.is_set():
+                    break
                 message = can_bus.recv(utils.CAN_WAIT_TIME)
                 if message.arbitration_id not in message_ids:
                     if not flat_time_setted:
@@ -61,7 +67,7 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
                     print("Expired waiting time for CAN bus messages")
                     break
                 t = time.time()
-                if (end_time is not None and t > end_time) or stop_event.is_set():
+                if (end_time is not None and t > end_time):
                     break
         else:
             # Read the log file
@@ -69,6 +75,8 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
             with open(CAN_log_file_source, "r") as log_file:
                 parser = cantools.logreader.Parser(log_file)
                 for message in parser:
+                    if stop_event.is_set():
+                        break
                     if message.frame_id not in message_ids:
                         continue
                     if flat_time == -1:
@@ -84,7 +92,7 @@ def read_CAN_bus(barrier: Any, stop_event: Any, CAN_device: str, CAN_filename: s
                     }
                     can_messages.append(object)
                     t = time.time()
-                    if (end_time is not None and t > end_time) or stop_event.is_set():
+                    if (end_time is not None and t > end_time):
                         break
 
     except Exception as e:
