@@ -112,9 +112,9 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
                 first_send = time.time()
             previous_time = d["timestamp"]
             if start_time:
-                difference = time.time() - first_send - (d["timestamp"] / 1e6)
-            else:
                 difference = time.time() - first_send - (d["timestamp"] - start_time / 1e6)
+            else:
+                difference = time.time() - first_send - (d["timestamp"] / 1e6)
             if (end_time and time.time() * 1e6 - startup_time > end_time):
                 break
 

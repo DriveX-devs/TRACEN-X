@@ -78,9 +78,9 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
                 bus.send(final_message)
             previous_time = d["timestamp"]
             if start_time:
-                difference = time.time() - first_send - (d["timestamp"] / 1e6)
-            else:
                 difference = time.time() - first_send - (d["timestamp"] - start_time / 1e6)
+            else:
+                difference = time.time() - first_send - (d["timestamp"] / 1e6)
             if (end_time and time.time() * 1e6 - startup_time > end_time):
                 break
     except Exception as e:
