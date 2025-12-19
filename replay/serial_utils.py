@@ -117,6 +117,7 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
         print(f"Error: {e}")
 
     finally:
+        print("GNSS serial reproduction terminated...")
         if ser:
             ser.stop()
         if first_send:

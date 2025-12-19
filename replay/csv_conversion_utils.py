@@ -140,7 +140,7 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
             break
 
     try:
-        print("Saving data to file", csv_filename)
+        print("Saving data to CSV file", csv_filename)
         # df.to_csv(csv_filename, index=False)
         with open(csv_filename, 'w') as f:
             # Write the header

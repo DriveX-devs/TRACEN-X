@@ -81,6 +81,7 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
     except Exception as e:
         print(f"Error: {e}")
     finally:
+        print("CAN BUS reproduction terminated...")
         if bus:
             bus.shutdown()
         if first_send:
