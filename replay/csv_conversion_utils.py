@@ -4,6 +4,7 @@ import math
 import time
 from decoded_messages import DecodedMessage
 from typing import Any
+from threading import BrokenBarrierError
 
 def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filename: str, csv_interpolation: bool, start_time: int, end_time: int, agent_id: int = 1, agent_type: str = "car"):
     """
@@ -51,9 +52,14 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
     last_heading = None
 
     if barrier:
-        barrier.wait()
+        try:
+            barrier.wait(timeout=2)
+        except BrokenBarrierError:
+            return
 
     for d in data:
+        if stop_event.is_set():
+            break
         last_time = d["timestamp"]
         message_type = d["type"]
         if message_type == "Unknown":
@@ -130,7 +136,7 @@ def csv_conversion(barrier: Any, stop_event: Any, input_filename: str, csv_filen
             df["accel_ms2"].append(acc)
             i += 1
 
-        if (end_time and time.time() * 1e6 - start_time > end_time) or stop_event.is_set():
+        if (end_time and time.time() * 1e6 - start_time > end_time):
             break
 
     try:

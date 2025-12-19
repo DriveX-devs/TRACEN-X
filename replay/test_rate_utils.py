@@ -3,6 +3,7 @@ import json
 from typing import Any
 from decoded_messages import DecodedMessage
 from utils import filter_by_start_time, compare_floats, CLUSTER_TSHOLD_MS
+from threading import BrokenBarrierError
 
 UBX_NAV_PVT_PRESENT, UBX_NAV_ATT_PRESENT, UBX_ESF_INS_PRESENT, UBX_ESF_RAW_PRESENT, UBX_NAV_STATUS_PRESENT = False, False, False, False, False
 
@@ -82,10 +83,15 @@ def test_rate(barrier: Any, stop_event: Any, filename: str, start_time: int, end
     prev_speed = -8000
 
     if barrier:
-        barrier.wait()
+        try:
+            barrier.wait(timeout=2)
+        except BrokenBarrierError:
+            return
 
     startup_time = time.time() * 1e6
     for d in data:
+        if stop_event.is_set():
+            break
         delta_time = d["timestamp"] - previous_time
         message_type = d["type"]
         if message_type == "Unknown":
@@ -193,7 +199,7 @@ def test_rate(barrier: Any, stop_event: Any, filename: str, start_time: int, end
             update_msg_speed.append(-1000)
 
         previous_time = d["timestamp"]
-        if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
+        if (end_time and time.time() * 1e6 - startup_time > end_time):
             break
     try:
         print_test_rate_stats(average_update_time, average_update_time_filtered)

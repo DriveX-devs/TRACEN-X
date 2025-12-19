@@ -1,6 +1,7 @@
 import argparse
 import signal
 import os
+import time
 from multiprocessing import Process, Event, Barrier
 
 def signal_handler(sig, frame, stop_event):
@@ -54,7 +55,7 @@ def main():
     args.add_argument("--pcap-filename", type=str, help="The pcap file to write to", default="./data/pcap_output/trace.pcapng")
 
     stop_event = Event()
-    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
+    # signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
     args = args.parse_args()
     enable_serial = args.enable_serial
@@ -65,9 +66,11 @@ def main():
 
     end_time = args.end_time
 
-    candump_process = None
-    serial_process = None
-    pcap_process = None
+    processes: dict[str, Process | None] = {
+        "candump_process": None,
+        "serial_process": None,
+        "pcap_process": None
+    }
 
     num_barriers = 0
     if enable_serial:
@@ -92,9 +95,9 @@ def main():
         if CAN_log_file_source:
             assert os.path.exists(CAN_log_file_source), "CAN log file source does not exist"
         # Start thread to read CAN bus
-        candump_process = Process(target=read_CAN_bus, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
+        processes["candump_process"] = Process(target=read_CAN_bus, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, CAN_log_file_source, end_time))
         # Set the thread as a daemon so it will be killed when the main thread exits
-        candump_process.start()
+        processes["candump_process"].start()
 
     if enable_serial:
         device = args.serial_device
@@ -111,30 +114,30 @@ def main():
             timeout=0
         )
         # Start the read serial function
-        serial_process = Process(target=read_serial, args=(barrier, stop_event, serial_filename, ser, end_time, real_time))
-        serial_process.start()
+        processes["serial_process"] = Process(target=read_serial, args=(barrier, stop_event, serial_filename, ser, end_time, real_time))
+        processes["serial_process"].start()
 
     if enable_pcap:
         interface = args.interface
         pcap_filename = args.pcap_filename
-        pcap_process = Process(target=sniff_pkt, args=(barrier, stop_event, pcap_filename, interface))
-        pcap_process.start()
+        processes["pcap_process"] = Process(target=sniff_pkt, args=(barrier, stop_event, pcap_filename, interface))
+        processes["pcap_process"].start()
 
     try:
-        if enable_CAN:
-            candump_process.join()
-
-        if enable_serial:
-            serial_process.join()
-
-        if enable_pcap:
-            pcap_process.join()
+        condition = True
+        while condition:
+            condition = any(processes[p] is not None and processes[p].is_alive() for p in processes.keys())
+            time.sleep(0.5)
     except KeyboardInterrupt:
-        print("Interrupted by user")
+        print("\nTerminating...")
         stop_event.set()
-        if candump_process: candump_process.join()
-        if serial_process: serial_process.join()
-        if pcap_process: pcap_process.join()
+    finally:
+        for p in processes.keys():
+            if processes[p]:
+                processes[p].join(timeout=2)
+                if processes[p].is_alive():
+                    processes[p].terminate()
+                    processes[p].join()
 
 
 if __name__ == "__main__":

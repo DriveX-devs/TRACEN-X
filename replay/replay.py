@@ -3,6 +3,7 @@ import os
 import signal
 import json
 import sys
+import time
 from pathlib import Path
 from multiprocessing import Process, Event, Barrier
 
@@ -170,22 +171,24 @@ def main():
 
     visualizer = None
     fifo_path = None
-    serial_process = None
-    can_process = None
-    test_rate_process = None
-    csv_process = None
-    gui_process = None
-    pcap_process = None
+    processes: dict[str, Process | None] = {
+        "serial_process": None,
+        "can_process": None,
+        "test_rate_process": None,
+        "csv_process": None,
+        "gui_process": None,
+        "pcap_process": None,
+    }
 
     stop_event = Event()
-    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
+    # signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
     if enable_serial:
         assert os.path.exists(serial_filename), "The file does not exist"
-        serial_process = Process(
+        processes["serial_process"] = Process(
             target=write_serial, args=(barrier, stop_event, server_device, client_device, baudrate, serial_filename, start_time, end_time)
         )
-        serial_process.start()
+        processes["serial_process"].start()
 
     if enable_CAN_gui:
         assert enable_serial_gui, "The serial GUI must be activated to display the CAN GUI"
@@ -203,37 +206,37 @@ def main():
         visualizer.start_nodejs_server(httpport, server_ip, server_port, fifo_path)
         if enable_CAN_gui and not enable_pcap_gui:
             # GUI enabled for serial and CAN
-            gui_process = Process(
+            processes["gui_process"] = Process(
                 target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db)
             )
         elif enable_CAN_gui and enable_pcap_gui:
             # GUI enabled for serial, CAN and pcap
-            gui_process = Process(
+            processes["gui_process"] = Process(
                 target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, CAN_filename, CAN_db, pcap_filename)
             )
         elif enable_pcap_gui:
             # GUI enabled for serial and pcap
-            gui_process = Process(
+            processes["gui_process"] = Process(
                 target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer, None, None, pcap_filename)
             )
         else:
             # GUI enabled only for serial
-            gui_process = Process(
+            processes["gui_process"] = Process(
                 target=serial_gui, args=(barrier, stop_event, serial_filename, start_time, end_time, server_ip, server_port, fifo_path, visualizer)
             )
 
-        gui_process.start()
+        processes["gui_process"].start()
     
     if enable_CAN:
         assert os.path.exists(CAN_filename), "The file does not exist"
         assert os.path.exists(CAN_db), "The CAN database file does not exist"
-        can_process = Process(target=write_CAN, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
-        can_process.start()
+        processes["can_process"] = Process(target=write_CAN, args=(barrier, stop_event, CAN_device, CAN_filename, CAN_db, start_time, end_time))
+        processes["can_process"].start()
 
     if enable_test_rate:
         assert os.path.exists(serial_filename), "The file does not exist"
-        test_rate_process = Process(target=test_rate, args=(barrier, stop_event, serial_filename, start_time, end_time))
-        test_rate_process.start()
+        processes["test_rate_process"] = Process(target=test_rate, args=(barrier, stop_event, serial_filename, start_time, end_time))
+        processes["test_rate_process"].start()
     
     if enable_csv:
         assert os.path.exists(serial_filename), "The file does not exist"
@@ -242,10 +245,10 @@ def main():
         assert agent_type in ["car", "vru"], "The agent type must be either car or vru"
         agent_id = input("Insert the agent id: ")
         assert agent_id, "The agent id must be inserted"
-        csv_process = Process(
+        processes["csv_process"] = Process(
             target=csv_conversion, args=(barrier, stop_event, serial_filename, csv_filename, csv_interpolation, start_time, end_time, agent_id, agent_type)
         )
-        csv_process.start()
+        processes["csv_process"].start()
 
     if enable_pcap:
         if update_datetime and update_security:
@@ -309,37 +312,24 @@ def main():
                 certificates = json.load(f)
             print(f"Loaded {len(certificates)} certificates from {filePath}")
         assert os.path.exists(pcap_filename)
-        pcap_process = Process(target=write_pcap, args=(barrier, stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
-        pcap_process.start()
+        processes["pcap_process"] = Process(target=write_pcap, args=(barrier, stop_event, pcap_filename, interface, start_time, end_time, update_datetime, new_pcap, enable_amqp, amqp_server_ip, amqp_server_port, amqp_topic, certificates, update_security))
+        processes["pcap_process"].start()
 
     try:
-        if enable_serial:
-            serial_process.join()
-
-        if enable_serial_gui:
-            gui_process.join()
-
-        if enable_CAN:
-            can_process.join()
-        
-        if enable_test_rate:
-            test_rate_process.join()
-        
-        if enable_csv:
-            csv_process.join()
-
-        if enable_pcap:
-            pcap_process.join()
-
+        condition = True
+        while condition:
+            condition = any(processes[p] is not None and processes[p].is_alive() for p in processes.keys())
+            time.sleep(0.5)
     except KeyboardInterrupt:
-        print("Interrupted by user")
+        print("\nTerminating...")
         stop_event.set()
-        if enable_serial: serial_process.join()
-        if enable_serial_gui: gui_process.join()
-        if enable_CAN: can_process.join()
-        if enable_test_rate: test_rate_process.join()
-        if enable_csv: csv_process.join()
-        if pcap_process: pcap_process.join()
+    finally:
+        for p in processes.keys():
+            if processes[p]:
+                processes[p].join(timeout=2)
+                if processes[p].is_alive():
+                    processes[p].terminate()
+                    processes[p].join()
         
 
 if __name__ == "__main__":

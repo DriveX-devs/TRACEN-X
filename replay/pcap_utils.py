@@ -8,6 +8,7 @@ import asn1tools as asn
 from scapy.utils import rdpcap, wrpcap
 from scapy.packet import raw
 from scapy.layers.l2 import Ether
+from threading import BrokenBarrierError
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
@@ -184,7 +185,10 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
         os.remove(new_pcap)
 
     if barrier:
-        barrier.wait()
+        try:
+            barrier.wait(timeout=2)
+        except BrokenBarrierError:
+            return
     
     startup_time = time.time() * 1e6
     try:
@@ -476,5 +480,5 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
         if enable_amqp:
             amqp_sender.stop()
             amqp_thread.join()
-        if sock is not None:
+        if sock:
             sock.close()

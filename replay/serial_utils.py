@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
 from decoded_messages import DecodedMessage
+from threading import BrokenBarrierError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,8 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
     - start_time (int): Start time in microseconds from the beginning of the log; data before this time will be skipped.
     - end_time (int): End time in microseconds; data after this time will be ignored.
     """
+    ser = None
+    first_send = None
     try:
         # Creation of the serial emulator
         ser = SerialEmulator(device_port=server_device, client_port=client_device, baudrate=baudrate)
@@ -49,12 +52,17 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
 
         decoder = DecodedMessage()
         if barrier:
-            barrier.wait()  # Ensure all processes start at the same time
+            try:
+                barrier.wait(timeout=2)
+            except BrokenBarrierError:
+                return
 
         startup_time = time.time() * 1e6
         for d in data:
-            delta_time = d["timestamp"] - previous_time
+            if stop_event.is_set():
+                break
 
+            delta_time = d["timestamp"] - previous_time
             # Calculate a variable delta time factor to adjust the time of the serial write to be as close as possible to a real time simulation
             # delta_time_us represents the real time in microseconds from the beginning of the simulation to the current time
             delta_time_us_real = time.time() * 1e6 - startup_time
@@ -101,17 +109,19 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
             if first_send is None:
                 first_send = time.time()
             previous_time = d["timestamp"]
-            if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
+            if (end_time and time.time() * 1e6 - startup_time > end_time):
                 break
 
     except Exception as e:
         print(f"Error: {e}")
 
     finally:
-        ser.stop()
-        print("Time to send all messages:", time.time() - first_send, "s")
-        if start_time:
-            print("Difference to the last message:", time.time() - first_send - (d["timestamp"] - start_time) / 1e6,
-                  "s")
-        else:
-            print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
+        if ser:
+            ser.stop()
+        if first_send:
+            print("Time to send all messages:", time.time() - first_send, "s")
+            if start_time:
+                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] - start_time) / 1e6,
+                    "s")
+            else:
+                print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")

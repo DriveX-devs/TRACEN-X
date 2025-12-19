@@ -2,6 +2,7 @@ from utils import filter_by_start_time
 import time
 import json
 from typing import Any
+from threading import BrokenBarrierError
 
 def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, db_file: str, start_time: int, end_time: int):
     """
@@ -18,8 +19,9 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
     """
     import can
     import cantools
+    first_send = None
+    bus = None
     try:
-        first_send = None
         f = open(input_filename, "r")
         data = json.load(f)
         f.close()
@@ -34,10 +36,15 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
         variable_delta_us_factor = 0
 
         if barrier:
-            barrier.wait()
+            try:
+                barrier.wait(timeout=2)
+            except BrokenBarrierError:
+                return
         
         startup_time = time.time() * 1e6
         for d in data:
+            if stop_event.is_set():
+                break
             delta_time = d["timestamp"] - previous_time
 
             start_time_us = start_time if start_time else 0
@@ -68,15 +75,17 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
                     first_send = time.time()
                 bus.send(final_message)
             previous_time = d["timestamp"]
-            if (end_time and time.time() * 1e6 - startup_time > end_time) or stop_event.is_set():
+            if (end_time and time.time() * 1e6 - startup_time > end_time):
                 break
     except Exception as e:
         print(f"Error: {e}")
     finally:
-        bus.shutdown()
-        print("Time to send all messages:", time.time() - first_send, "s")
-        if start_time:
-            print("Difference to the last message:", time.time() - first_send - d["timestamp"] - start_time / 1e6, "s")
-        else:
-            print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
+        if bus:
+            bus.shutdown()
+        if first_send:
+            print("Time to send all messages:", time.time() - first_send, "s")
+            if start_time:
+                print("Difference to the last message:", time.time() - first_send - d["timestamp"] - start_time / 1e6, "s")
+            else:
+                print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
 
