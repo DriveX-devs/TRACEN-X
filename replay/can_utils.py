@@ -87,7 +87,7 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
         if first_send:
             print("Time to send all messages:", time.time() - first_send, "s")
             if start_time:
-                print("Difference to the last message:", time.time() - first_send - d["timestamp"] - start_time / 1e6, "s")
+                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] - start_time / 1e6), "s")
             else:
-                print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
+                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] / 1e6), "s")
 

@@ -126,4 +126,4 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
                 print("Difference to the last message:", time.time() - first_send - (d["timestamp"] - start_time) / 1e6,
                     "s")
             else:
-                print("Difference to the last message:", time.time() - first_send - d["timestamp"] / 1e6, "s")
+                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] / 1e6), "s")
