@@ -58,6 +58,7 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
                 print("Error: BrokenBarrier")
                 return
 
+        difference = None
         startup_time = time.time() * 1e6
         for d in data:
             if stop_event.is_set():
@@ -110,6 +111,10 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
             if first_send is None:
                 first_send = time.time()
             previous_time = d["timestamp"]
+            if start_time:
+                difference = time.time() - first_send - (d["timestamp"] / 1e6)
+            else:
+                difference = time.time() - first_send - (d["timestamp"] - start_time / 1e6)
             if (end_time and time.time() * 1e6 - startup_time > end_time):
                 break
 
@@ -122,9 +127,4 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
             ser.stop()
         if first_send:
             print("Time to send all messages:", time.time() - first_send, "s")
-            if start_time:
-                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] - start_time) / 1e6,
-                    "s")
-            else:
-                print(time.time(), first_send, d["timestamp"] / 1e6)
-                print("Difference to the last message:", time.time() - first_send - (d["timestamp"] / 1e6), "s")
+            print("Difference to the last message:", difference, "s")
