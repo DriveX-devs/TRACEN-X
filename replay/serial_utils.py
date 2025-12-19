@@ -55,6 +55,7 @@ def write_serial(barrier: Any, stop_event: Any, server_device: str, client_devic
             try:
                 barrier.wait(timeout=2)
             except BrokenBarrierError:
+                print("Error: BrokenBarrier")
                 return
 
         startup_time = time.time() * 1e6

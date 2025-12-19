@@ -39,6 +39,7 @@ def write_CAN(barrier: Any, stop_event: Any, device: str, input_filename: str, d
             try:
                 barrier.wait(timeout=2)
             except BrokenBarrierError:
+                print("Error: BrokenBarrier")
                 return
         
         startup_time = time.time() * 1e6
