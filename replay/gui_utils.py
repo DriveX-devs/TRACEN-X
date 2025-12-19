@@ -26,9 +26,6 @@ CAM_ID_SET = set()
 cpm_asn = "./data/asn/CPM-all.asn"
 vam_asn = "./data/asn/VAM-PDU-FullDescription.asn"
 cam_asn = "./data/asn/CAM-all-old.asn"
-CPM = asn.compile_files(cpm_asn, "uper")
-VAM = asn.compile_files(vam_asn, "uper")
-CAM = asn.compile_files(cam_asn, "uper")
 
 def manage_map(GNSS_flag: bool, CAN_flag: bool, pcap_flag: bool, fifo_path: str, latitude: float, longitude: float, heading: float, server_ip: str, server_port: int, visualizer: Visualizer, station_id: int = 1, type: int = 5):
     global MAP_OPENED
@@ -55,6 +52,9 @@ def manage_map(GNSS_flag: bool, CAN_flag: bool, pcap_flag: bool, fifo_path: str,
 
 
 def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str, server_port: int, fifo_path: str, visualizer: Visualizer):
+    CPM = asn.compile_files(cpm_asn, "uper")
+    VAM = asn.compile_files(vam_asn, "uper")
+    CAM = asn.compile_files(cam_asn, "uper")
     pcap = rdpcap(pcap_filename)
     assert pcap, "Pcap file is empty"
 
