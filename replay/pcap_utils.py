@@ -106,7 +106,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
 
     if enable_amqp:
         from proton import Message
-        from proton.reactor import Container
+        from proton.reactor import Container, EventInjector, ApplicationEvent, AtMostOnce
         from proton.handlers import MessagingHandler
         class AMQPSender(MessagingHandler):
             def __init__(self, server, port, topic):
@@ -115,15 +115,23 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                 self.port = port
                 self.topic = topic
                 self.sender = None
+                self.injector = EventInjector()
                 self.container = Container(self)
+                self.container.selectable(self.injector)
 
             def on_start(self, event) -> None:
                 try:
                     conn = event.container.connect(f"{self.server}:{self.port}")
-                    self.sender = event.container.create_sender(conn, "topic://" + self.topic)
+                    self.sender = event.container.create_sender(conn, "topic://" + self.topic, options=AtMostOnce())
                 except Exception as e:
                     print(f"Error: {e}")
                     exit(-1)
+            
+            def on_send_msg(self, event) -> None:
+                try:
+                    self.sender.send(event.subject)
+                except Exception as e:
+                    print(f"Sending error in reactor: {e}")
 
             def send_message(self, raw_bytes: bytes, message_id: str, properties: dict = None) -> bool:
                 success = True
@@ -135,7 +143,8 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                             properties=properties or {},
                             content_type="application/octet-stream"
                         )
-                        self.sender.send(msg)
+                        # Inject the event into the reactor thread immediately
+                        self.injector.trigger(ApplicationEvent("send_msg", subject=msg))
                 except Exception as e:
                     print(f"Sending error: {e}")
                     success = False
@@ -146,6 +155,7 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                 self.container.run()
 
             def stop(self) -> None:
+                self.injector.close()
                 self.container.stop()
 
     CPM = asn.compile_files(cpm_asn, "uper")
