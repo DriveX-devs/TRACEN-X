@@ -14,6 +14,8 @@ METERS_PER_DEGREE_LATITUDE = 111320
 SPEED_THRESHOLD = 15  # [m/s]
 AGE_THRESHOLD = 20  # [ms]
 
+# GeoNetworking Ethertype marker (used to find GN payload in any encapsulation)
+GN_ETHERTYPE = b'\x89\x47'
 
 def compare_floats(a: float, b: float) -> bool:
     return math.isclose(a, b, rel_tol=1e-8)
@@ -23,3 +25,17 @@ def filter_by_start_time(data, start_time: int) -> list:
     start_time_micseconds = start_time
     assert start_time_micseconds < data[-1]["timestamp"], "The start time is greater than the last timestamp in the file"
     return list(filter(lambda x: x["timestamp"] >= start_time_micseconds, data))
+
+def find_gn_payload_offset(raw_pkt: bytes) -> int:
+    """
+    Find the offset where the GeoNetworking payload starts in a raw packet.
+    Works with both Ethernet II (14-byte header) and 802.11 + LLC/SNAP (34-byte header)
+    by searching for the GeoNetworking Ethertype marker (0x8947).
+
+    Returns the byte offset right after the 0x8947 marker (i.e., the start of the GN Basic Header).
+    Returns -1 if the marker is not found.
+    """
+    idx = raw_pkt.find(GN_ETHERTYPE)
+    if idx >= 0:
+        return idx + 2  # skip the 2-byte Ethertype itself
+    return -1
