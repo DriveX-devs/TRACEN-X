@@ -89,6 +89,7 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
 
                 gn_offset = find_gn_payload_offset(raw(pkt))
                 if gn_offset < 0:
+                    # best-effort: skip non-V2X packets silently to avoid log spam
                     continue
                 data = raw(pkt)[gn_offset:]
                 btp = data[BTP_LOW: BTP_HIGH]

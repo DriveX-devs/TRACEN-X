@@ -221,7 +221,9 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                 raw_part = None
                 try:
                     gn_offset = find_gn_payload_offset(raw(pkt))
-                    assert gn_offset >= 0, "GeoNetworking Ethertype not found in the packet, cannot update datetime"
+                    if gn_offset < 0:
+                        print(f"ERROR: GeoNetworking Ethertype (0x8947) not found in packet {i+1}, dropping (cannot update datetime)")
+                        continue
                     # Extract the header part
                     header_part = raw(pkt)[:gn_offset]
                     # Take the rest ot the packet
