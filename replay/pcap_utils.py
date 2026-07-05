@@ -9,11 +9,11 @@ from scapy.utils import rdpcap, wrpcap
 from scapy.packet import raw
 from scapy.layers.l2 import Ether
 from threading import BrokenBarrierError
+from utils import find_gn_payload_offset
 
 # Normal packet (without security layer) constants
 GEONET_LENGTH = 40
 BASICHEADER = 4
-ETHER_LENGTH = 14
 GEONET_TS_LOW = 20
 GEONET_TS_HIGH = 24
 BTP_LOW = 40
@@ -231,10 +231,14 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
             if update_datetime:
                 raw_part = None
                 try:
-                    # Extract the Ethernet II part
-                    ether_part = raw(pkt)[:ETHER_LENGTH]
+                    gn_offset = find_gn_payload_offset(raw(pkt))
+                    if gn_offset < 0:
+                        print(f"ERROR: GeoNetworking Ethertype (0x8947) not found in packet {i+1}, dropping (cannot update datetime)")
+                        continue
+                    # Extract the header part
+                    header_part = raw(pkt)[:gn_offset]
                     # Take the rest ot the packet
-                    data = raw(pkt)[ETHER_LENGTH:]
+                    data = raw(pkt)[gn_offset:]
                     # Check if the security layer is active
                     security_enabled = False if data[:1] == b'\x11' else True
                     # Set the fields for pkt reconstruction to None to check if they will be filled properly
@@ -261,8 +265,8 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                         from security_utils.Security import Security
                         security = Security()
                         pack = raw(pkt)
-                        EtherAndBasic = pack[:ETHER_LENGTH+BASICHEADER]
-                        DecodedPacket = SECURITY.decode("Ieee1609Dot2Data", pack[18:])
+                        EtherAndBasic = pack[:gn_offset + BASICHEADER]
+                        DecodedPacket = SECURITY.decode("Ieee1609Dot2Data", pack[gn_offset + BASICHEADER:])
                         payload_data = DecodedPacket['content'][1]['tbsData']['payload']['data']
                         payload_choice, UnsecuredData = payload_data['content']
                         Signer = DecodedPacket['content'][1]['signer'][0]  # header
@@ -451,8 +455,8 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                         # Build the new packet
                         raw_part = new_geonet + btp + mex_encoded
                         
-                        if ether_part and raw_part:
-                            new_pkt = ether_part + raw_part
+                        if header_part and raw_part:
+                            new_pkt = header_part + raw_part
                         if security_enabled:
                             # rebuild the security layer
                             new_payload = btp + mex_encoded
@@ -489,11 +493,16 @@ def write_pcap(barrier: Any, stop_event: Any, input_filename: str, interface: st
                 try:
                     sock.send(new_pkt)
                     if enable_amqp:
-                        # Send the packet to the AMQP broker (excluding first 14 bytes of any Ethernet II "dummy" header)
-                        properties = compute_properties(security_enabled, port, StationID)
-                        succ = amqp_sender.send_message(new_pkt[ETHER_LENGTH:], message_id=f"packet{i+1}", properties=properties)
-                        if not succ:
-                            print("ERROR on message sending to the AMQP broker!")
+                        # Send the GeoNetworking payload to the AMQP broker
+                        # Auto-detect offset to support both Ethernet II and 802.11+LLC/SNAP encapsulations
+                        gn_offset = find_gn_payload_offset(new_pkt)
+                        if gn_offset < 0:
+                            print(f"WARNING: GeoNetworking Ethertype (0x8947) not found in packet {i+1}, skipping AMQP send")
+                        else:
+                            properties = compute_properties(security_enabled, port, StationID)
+                            succ = amqp_sender.send_message(new_pkt[gn_offset:], message_id=f"packet{i+1}", properties=properties)
+                            if not succ:
+                                print("ERROR on message sending to the AMQP broker!")
                 except Exception as e:
                     print(f"Error: {e}")
     except Exception as e:

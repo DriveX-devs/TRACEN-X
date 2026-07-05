@@ -9,13 +9,12 @@ from visualizer import Visualizer
 from scapy.all import *
 import asn1tools as asn
 from typing import Any
-from utils import filter_by_start_time, STANDARD_OBJECT_LENGTH, BUMPER_TO_SENSOR_DISTANCE
+from utils import find_gn_payload_offset, filter_by_start_time, STANDARD_OBJECT_LENGTH, BUMPER_TO_SENSOR_DISTANCE
 
 MAP_OPENED = False
 BTP_LOW = 40
 BTP_HIGH = 44
 BTP_PORT_HIGH = 2
-ETHER_LENGTH = 14
 
 CONVERSION_CONSTANT = 1e7
 PERCEIVED_OBJ_CONT_IDX = 5
@@ -88,7 +87,11 @@ def pcap_gui(pcap_filename: str, start_time: int, end_time: int, server_ip: str,
                     # print("Trying to sleep for a negative time, thus not sleeping: ", variable_delta_us_factor / 1e3)
                     pass
 
-                data = raw(pkt)[ETHER_LENGTH:]
+                gn_offset = find_gn_payload_offset(raw(pkt))
+                if gn_offset < 0:
+                    # best-effort: skip non-V2X packets silently to avoid log spam
+                    continue
+                data = raw(pkt)[gn_offset:]
                 btp = data[BTP_LOW: BTP_HIGH]
                 port = int.from_bytes(btp[:BTP_PORT_HIGH], byteorder="big")
                 _, ego_lon, _ = visualizer.get_ego_position()
